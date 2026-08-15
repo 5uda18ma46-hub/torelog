@@ -438,6 +438,17 @@
     font-family: var(--font-ui); font-size: 12px; line-height: 1; }
   .ord button:hover { color: var(--ink); border-color: var(--line-strong); }
   .ord button[disabled] { opacity: .35; cursor: default; }
+  .field { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 11px 14px; border-top: 1px solid var(--line); }
+  .field:first-child { border-top: 0; }
+  .field label { font-size: 13.5px; color: var(--ink-2); font-weight: 550; white-space: nowrap; }
+  .field input[type="date"], .field input[type="number"] {
+    flex: 1; min-width: 0; text-align: right;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    font-family: var(--font-ui); font-size: 15px; font-weight: 600;
+    font-variant-numeric: tabular-nums; border-radius: 9px; padding: 8px 10px;
+  }
+  .field input:focus { outline: none; border-color: var(--accent); }
   textarea.json {
     width: 100%; min-height: 130px; border: 1px solid var(--line); border-radius: 10px;
     background: var(--surface); color: var(--ink-2); font-family: ui-monospace, Menlo, monospace;
@@ -763,6 +774,14 @@
     if (DB.bodyLogs.length) return DB.bodyLogs[DB.bodyLogs.length - 1].weight;
     return DB.settings.startWeight;
   }
+  /* その日時点の体重（自重種目の挙上量に使う）。無ければ直近の記録に落とす */
+  function bodyWeightOn(key) {
+    var best = null;
+    DB.bodyLogs.forEach(function (b) {
+      if (b.date <= key && (!best || b.date > best.date)) best = b;
+    });
+    return best ? best.weight : currentBodyWeight();
+  }
 
   /* =========================================================
      4. 小道具
@@ -864,7 +883,7 @@
       charts: [viewCharts, null], settings: [viewSettings, null],
       exerciseList: [viewExerciseList, null], exerciseEdit: [viewExerciseEdit, null],
       exerciseNew: [viewExerciseNew, null], programEdit: [viewProgramEdit, null],
-      data: [viewData, null]
+      data: [viewData, null], weightLog: [viewWeightLog, null]
     };
     (R[v.name] || R.home)[0](v.arg);
     renderTabs();
@@ -1030,6 +1049,30 @@
           sw.addEventListener("click", function () { S.pendingProgram = other.id; render(); });
           c.appendChild(sw);
         }
+        /* 携帯を忘れた日などに、後から日付を指定して記録する */
+        if (!S.showBackfill) {
+          var bl = el("button", "linkbtn", "別の日の分を記録する");
+          bl.addEventListener("click", function () { S.showBackfill = true; render(); });
+          c.appendChild(bl);
+        } else {
+          var f = el("div", "field",
+            '<label>日付</label><input type="date" value="' + dateKey(new Date()) +
+            '" max="' + dateKey(new Date()) + '">');
+          f.style.borderTop = "0";
+          f.style.padding = "0";
+          c.appendChild(f);
+          var go2 = el("button", "primary", "この日付で記録を始める");
+          go2.addEventListener("click", function () {
+            var d = f.querySelector("input").value;
+            if (!d) { toast("日付を選んでください"); return; }
+            S.showBackfill = false;
+            startSession(prog.id, d);
+          });
+          c.appendChild(go2);
+          var cancel = el("button", "linkbtn", "やめる");
+          cancel.addEventListener("click", function () { S.showBackfill = false; render(); });
+          c.appendChild(cancel);
+        }
       }
     }
     appEl.appendChild(c);
@@ -1047,6 +1090,13 @@
       '<div class="card-head"><span class="card-k">体重</span>' +
       '<span class="card-note">' + esc(deltaTxt) + "</span></div>" +
       '<div class="w-row"><div><div class="w-val">' + fmtW(bw) + "<small>kg</small></div></div></div>";
+    var wHead = wc.querySelector(".card-head");
+    if (DB.bodyLogs.length) {
+      var hl = el("button", "linkbtn", "履歴（" + DB.bodyLogs.length + "件）");
+      hl.style.alignSelf = "auto";
+      wHead.replaceChild(hl, wHead.querySelector(".card-note"));
+      hl.addEventListener("click", function () { push("weightLog", null); });
+    }
     var wr = wc.querySelector(".w-row");
     var btns = el("div", "w-btns");
     var minus = el("button", null, "−"); minus.setAttribute("aria-label", "体重を減らす");
@@ -1134,6 +1184,90 @@
     });
   }
 
+  /* --- 体重の履歴 --- */
+  function viewWeightLog() {
+    nav("体重の記録");
+    var logs = DB.bodyLogs.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+
+    if (logs.length) {
+      var first = logs[logs.length - 1], last = logs[0];
+      var d0 = Math.round((last.weight - first.weight) * 10) / 10;
+      var t = el("div", "tiles");
+      t.innerHTML =
+        '<div class="tile"><span class="k">最新</span><span class="v">' + fmtW(last.weight) + "<small>kg</small></span></div>" +
+        '<div class="tile"><span class="k">増減</span><span class="v">' + (d0 >= 0 ? "+" : "") + d0 + "<small>kg</small></span></div>" +
+        '<div class="tile"><span class="k">記録数</span><span class="v">' + logs.length + "<small>件</small></span></div>";
+      appEl.appendChild(t);
+    }
+
+    if (logs.length >= 2) {
+      var asc = logs.slice().reverse();
+      var c = el("div", "card");
+      c.innerHTML = '<div class="card-head"><span class="card-k">推移</span>' +
+        '<span class="card-note">記録した日のみ</span></div>';
+      var cw = el("div", "chartwrap");
+      c.appendChild(cw);
+      appEl.appendChild(c);
+      lineChart(cw, {
+        vals: asc.map(function (b) { return b.weight; }),
+        labels: asc.map(function (b) { return md(b.date); }),
+        aria: "体重の推移",
+        fmtY: function (x) { return x.toFixed(1); },
+        tip: function (i) { return fmtW(asc[i].weight) + "kg<span>" + md(asc[i].date) + "</span>"; }
+      });
+    }
+
+    /* 追加・修正フォーム */
+    var fp = group("記録を追加・修正", null,
+      "同じ日付で追加すると上書きします。過去の日付も入れられます");
+    var f1 = el("div", "field",
+      '<label>日付</label><input type="date" value="' + dateKey(new Date()) + '" max="' + dateKey(new Date()) + '">');
+    var f2 = el("div", "field",
+      '<label>体重</label><input type="number" step="0.1" inputmode="decimal" value="' + fmtW(currentBodyWeight()) + '">');
+    fp.appendChild(f1); fp.appendChild(f2);
+    var addBtn = el("button", "primary", "この日付で記録する");
+    addBtn.addEventListener("click", function () {
+      var d = f1.querySelector("input").value;
+      var w = parseFloat(f2.querySelector("input").value);
+      if (!d || isNaN(w) || w <= 0) { toast("日付と体重を入れてください"); return; }
+      w = Math.round(w * 10) / 10;
+      var found = false;
+      DB.bodyLogs.forEach(function (b) { if (b.date === d) { b.weight = w; found = true; } });
+      if (!found) DB.bodyLogs.push({ date: d, weight: w });
+      DB.bodyLogs.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+      save("bodyLogs");
+      toast(md(d) + " を " + fmtW(w) + "kg で記録しました");
+      render();
+    });
+    appEl.appendChild(addBtn);
+
+    if (!logs.length) {
+      appEl.appendChild(el("div", "card", '<div class="empty">まだ記録がありません。</div>'));
+      return;
+    }
+
+    var p = group("すべての記録", "新しい順");
+    logs.forEach(function (b, i) {
+      var prev = logs[i + 1];
+      var diff = prev ? Math.round((b.weight - prev.weight) * 10) / 10 : null;
+      var row = el("div", "row dated");
+      row.innerHTML =
+        '<span class="dt">' + parseKey(b.date).getDate() + "<small>" + dow(b.date) + "</small></span>" +
+        '<span class="main"><span class="t">' + fmtW(b.weight) + "kg</span>" +
+        '<span class="s">' + ymLabel(b.date) +
+        (diff === null ? "" : " ・ 前回比 " + (diff >= 0 ? "+" : "") + diff + "kg") + "</span></span>";
+      var del = el("button", "ghost", "削除");
+      del.style.flex = "none"; del.style.padding = "6px 12px";
+      del.addEventListener("click", function () {
+        if (!confirm(md(b.date) + " の記録を削除します。")) return;
+        DB.bodyLogs = DB.bodyLogs.filter(function (x) { return x.date !== b.date; });
+        save("bodyLogs"); render();
+      });
+      row.appendChild(del);
+      p.appendChild(row);
+    });
+  }
+
   function spark(svg, vals) {
     var W = 320, H = 46, pad = 5;
     var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
@@ -1154,13 +1288,16 @@
   /* =========================================================
      7. セッション
      ========================================================= */
-  function startSession(programId) {
+  function startSession(programId, forDate) {
     var prog = progById(programId);
     if (!prog) return;
-    var bw = currentBodyWeight();
+    var today = dateKey(new Date());
+    var date = forDate || today;
+    var bw = bodyWeightOn(date);
     var s = {
-      id: rid("ses"), programId: prog.id, date: dateKey(new Date()),
+      id: rid("ses"), programId: prog.id, date: date,
       startedAt: new Date().toISOString(), endedAt: null,
+      backfilled: date !== today,
       bodyWeightAtTime: bw, note: "",
       exercises: prog.items.map(function (it) {
         var e = exById(it.exerciseId);
@@ -1196,6 +1333,10 @@
       action: "終了", onAction: finishSession
     });
 
+    if (s.backfilled) {
+      appEl.appendChild(el("div", "hint",
+        "<b>" + md(s.date) + "（" + dow(s.date) + "）の記録として保存されます。</b>"));
+    }
     var head = el("div", "sesshead");
     var doneCount = s.exercises.filter(seDone).length;
     var planned = s.exercises.reduce(function (a, x) { return a + Math.max(x.plannedSets, x.sets.length); }, 0);
@@ -1551,7 +1692,8 @@
     if (!s) { pop(); return; }
     nav(md(s.date) + "（" + dow(s.date) + "）");
 
-    var mins = s.endedAt ? Math.max(1, Math.round((new Date(s.endedAt) - new Date(s.startedAt)) / 60000)) : null;
+    var mins = (s.endedAt && !s.backfilled)
+      ? Math.max(1, Math.round((new Date(s.endedAt) - new Date(s.startedAt)) / 60000)) : null;
     var t = el("div", "tiles");
     t.innerHTML =
       '<div class="tile"><span class="k">総挙上量</span><span class="v">' + fmtInt(sessionVolume(s)) + "<small>kg</small></span></div>" +
@@ -1589,6 +1731,22 @@
             esc(setLabel(m, st.weight, st.reps)) + "</b></span>";
         }).join("") + "</div>" + cmp;
       p.appendChild(d);
+    });
+
+    /* 日付の付け替え（記録し忘れて別の日に入れてしまったとき用） */
+    var dp = group("日付", null, "違う日に記録してしまったときは、ここで直せます");
+    var df = el("div", "field",
+      '<label>この記録の日付</label><input type="date" value="' + s.date + '" max="' + dateKey(new Date()) + '">');
+    dp.appendChild(df);
+    df.querySelector("input").addEventListener("change", function () {
+      var nd = this.value;
+      if (!nd || nd === s.date) return;
+      s.date = nd;
+      s.backfilled = nd !== dateKey(new Date());
+      s.bodyWeightAtTime = bodyWeightOn(nd);
+      save("sessions");
+      toast(md(nd) + " に付け替えました");
+      render();
     });
 
     var del = el("button", "danger", "このセッションを削除");
@@ -1783,6 +1941,9 @@
         '<span class="d">' + (wd >= 0 ? "<b>+" + wd + "kg</b>" : '<b class="down">' + wd + "kg</b>") + " / 全期間</span></div>";
       var ww = el("div", "chartwrap");
       wc2.appendChild(ww);
+      var wlink = el("button", "linkbtn", "体重の記録を見る・追加する");
+      wlink.addEventListener("click", function () { push("weightLog", null); });
+      wc2.appendChild(wlink);
       appEl.appendChild(wc2);
       lineChart(ww, {
         vals: wvals, labels: wlabels, aria: "体重の推移",
