@@ -1,0 +1,2349 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="ジムでの記録の手間を最小にする筋トレ記録アプリ">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ToreLog">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#EDF0EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0C100F" media="(prefers-color-scheme: dark)">
+<title>ToreLog</title>
+
+<style>
+  :root {
+    --ground: #EDF0EF;
+    --surface: #FCFDFC;
+    --surface-2: #F2F5F4;
+    --line: #DCE2E0;
+    --line-strong: #C3CCC9;
+    --ink: #141A18;
+    --ink-2: #5B6764;
+    --ink-3: #889490;
+    --accent: #0C6B5D;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #D9EAE6;
+    --warn: #A04716;
+    --warn-soft: #F6E4D7;
+    --shadow: 0 1px 2px rgba(20,26,24,.06), 0 12px 32px rgba(20,26,24,.08);
+    --font-ui: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
+      "Noto Sans JP", "Yu Gothic Medium", "Meiryo", sans-serif;
+    --r: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0C100F; --surface: #171C1B; --surface-2: #1F2524;
+      --line: #2B3331; --line-strong: #3C4644;
+      --ink: #E9EEEC; --ink-2: #97A4A0; --ink-3: #74817D;
+      --accent: #40C1A7; --accent-ink: #07211C; --accent-soft: #11332D;
+      --warn: #E1904F; --warn-soft: #33241A;
+      --shadow: 0 1px 2px rgba(0,0,0,.5), 0 16px 40px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0C100F; --surface: #171C1B; --surface-2: #1F2524;
+    --line: #2B3331; --line-strong: #3C4644;
+    --ink: #E9EEEC; --ink-2: #97A4A0; --ink-3: #74817D;
+    --accent: #40C1A7; --accent-ink: #07211C; --accent-soft: #11332D;
+    --warn: #E1904F; --warn-soft: #33241A;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 16px 40px rgba(0,0,0,.45);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--font-ui); font-size: 15px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    display: flex; justify-content: center;
+  }
+
+  #shell {
+    width: 100%; max-width: 460px; height: 100%;
+    background: var(--surface);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  @media (min-width: 480px) {
+    body { padding: 20px 0; }
+    #shell { height: calc(100% - 40px); border: 1px solid var(--line);
+      border-radius: 22px; box-shadow: var(--shadow); }
+  }
+
+  /* ---------- nav ---------- */
+  .nav {
+    flex: 0 0 auto; padding: calc(14px + env(safe-area-inset-top)) 14px 12px;
+    border-bottom: 1px solid var(--line);
+    display: grid; grid-template-columns: 54px 1fr 54px; align-items: center; gap: 6px;
+  }
+  .nav.plain { grid-template-columns: 1fr auto; padding: calc(16px + env(safe-area-inset-top)) 16px 12px; }
+  .nav h1 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; text-align: center; }
+  .nav.plain h1 { text-align: left; font-size: 19px; }
+  .nav .sub { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .navbtn {
+    border: 0; background: none; cursor: pointer; padding: 6px 2px;
+    font-family: var(--font-ui); color: var(--accent);
+    font-size: 14px; font-weight: 600; white-space: nowrap;
+  }
+  .navbtn.back { font-size: 20px; text-align: left; }
+  .navbtn.right { text-align: right; }
+  .navbtn:disabled { color: var(--ink-3); cursor: default; }
+
+  .scroll {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 12px;
+    padding: 12px 12px 26px; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .scroll > * { flex: 0 0 auto; }
+
+  /* ---------- tabs ---------- */
+  .tabs {
+    flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--line); background: var(--surface);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tab {
+    border: 0; background: none; cursor: pointer; font-family: var(--font-ui);
+    padding: 9px 0 12px; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    color: var(--ink-3); font-size: 10.5px; font-weight: 600;
+  }
+  .tab.on { color: var(--accent); }
+  .tab svg { width: 20px; height: 20px; stroke: currentColor; fill: none;
+    stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+
+  /* ---------- generic ---------- */
+  .group { display: flex; flex-direction: column; gap: 7px; }
+  .gk { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600; padding: 0 4px;
+    display: flex; justify-content: space-between; gap: 8px; }
+  .gk span { font-weight: 550; letter-spacing: 0; text-transform: none; font-size: 11px; }
+  .gnote { font-size: 11.5px; color: var(--ink-3); padding: 2px 4px 0; }
+  .panel { background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: var(--r); overflow: hidden; display: flex; flex-direction: column; }
+  .card { background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; gap: 11px; }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .card-k { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600; }
+  .card-note { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+  .row {
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px;
+    padding: 13px 14px; border-top: 1px solid var(--line);
+    border-left: 0; border-right: 0; border-bottom: 0; background: none;
+    width: 100%; text-align: left; font-family: var(--font-ui);
+    font-size: 14.5px; color: var(--ink);
+  }
+  .row:first-child { border-top: 0; }
+  button.row { cursor: pointer; }
+  button.row:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+  button.row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .row .main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .row .t { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .s { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .row .r { display: flex; align-items: center; gap: 7px; font-size: 13px;
+    color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .row .rv { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+  .row .v { font-size: 13.5px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .row .v small { font-size: 10px; font-weight: 500; color: var(--ink-3); margin-left: 1px; }
+  .row.dim .t, .row.dim .s { color: var(--ink-3); }
+  .row.dated { grid-template-columns: 44px 1fr auto; }
+  .row .dt { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .row .dt small { display: block; font-size: 10px; font-weight: 550; color: var(--ink-3); }
+  .chev { color: var(--ink-3); font-size: 15px; }
+
+  .primary {
+    border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-ink);
+    font-family: var(--font-ui); font-size: 15.5px; font-weight: 650;
+    padding: 14px 0; cursor: pointer; width: 100%;
+  }
+  .primary:active { filter: brightness(.94); }
+  .primary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .primary.big { font-size: 16.5px; padding: 16px 0; }
+  .ghost {
+    flex: 1; border: 1px solid var(--line); background: none; color: var(--ink-2);
+    border-radius: 10px; padding: 10px 0; font-family: var(--font-ui);
+    font-size: 13px; font-weight: 550; cursor: pointer;
+  }
+  .ghost:hover { color: var(--ink); border-color: var(--line-strong); }
+  .ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .danger {
+    border: 1px solid var(--line); border-radius: 12px; background: none; color: var(--warn);
+    font-family: var(--font-ui); font-size: 14px; font-weight: 600;
+    padding: 12px 0; cursor: pointer; width: 100%;
+  }
+  .danger:hover { background: var(--warn-soft); }
+  .rowbtns { display: flex; gap: 8px; }
+  .linkbtn {
+    align-self: center; border: 0; background: none; padding: 0; color: var(--ink-2);
+    font-family: var(--font-ui); font-size: 12.5px; font-weight: 550; cursor: pointer;
+    text-decoration: underline; text-underline-offset: 3px;
+  }
+  .linkbtn:hover { color: var(--ink); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 14px; border-top: 1px solid var(--line); }
+  .chips:first-child { border-top: 0; }
+  .chiprow { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .chiprow::-webkit-scrollbar { display: none; }
+  .chip {
+    border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2);
+    border-radius: 999px; padding: 6px 13px; font-family: var(--font-ui);
+    font-size: 12.5px; font-weight: 550; cursor: pointer; white-space: nowrap;
+  }
+  .chip:hover { color: var(--ink); }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 11px; padding: 3px; }
+  .seg button { border: 0; background: none; border-radius: 8px; font-family: var(--font-ui);
+    font-size: 13.5px; font-weight: 600; color: var(--ink-2); padding: 8px 0; cursor: pointer; }
+  .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+  .stepbox { display: flex; align-items: center; gap: 6px; }
+  .stepbox button {
+    width: 34px; height: 34px; padding: 0; border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--ink); border-radius: 9px; cursor: pointer;
+    font-family: var(--font-ui); font-size: 17px; line-height: 1;
+  }
+  .stepbox button:hover { border-color: var(--ink-3); }
+  .stepbox .v { min-width: 62px; text-align: center; font-size: 15px; font-weight: 650;
+    font-variant-numeric: tabular-nums; }
+
+  .sw { width: 44px; height: 26px; border-radius: 999px; border: 0; background: var(--line-strong);
+    position: relative; cursor: pointer; transition: background .16s ease; flex: 0 0 auto; }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+    border-radius: 50%; background: var(--surface); transition: transform .16s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .sw.on { background: var(--accent); }
+  .sw.on::after { transform: translateX(18px); }
+
+  .search { display: flex; align-items: center; gap: 8px; background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px; }
+  .search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink);
+    font-family: var(--font-ui); font-size: 14.5px; }
+  .search input:focus { outline: none; }
+  .search svg { width: 16px; height: 16px; stroke: var(--ink-3); fill: none; stroke-width: 2; }
+
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .tile { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+    padding: 11px 12px; display: flex; flex-direction: column; gap: 1px; }
+  .tile .k { font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600; }
+  .tile .v { font-size: 19px; font-weight: 650; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums; line-height: 1.3; }
+  .tile .v small { font-size: 11px; font-weight: 550; color: var(--ink-2); margin-left: 1px; }
+
+  .hero { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+  .hero .n { font-size: 28px; font-weight: 650; letter-spacing: -.025em;
+    font-variant-numeric: tabular-nums; line-height: 1; }
+  .hero .n small { font-size: 12px; font-weight: 550; color: var(--ink-2); margin-left: 2px; }
+  .hero .d { font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .hero .d b { color: var(--accent); font-weight: 650; }
+  .hero .d b.down { color: var(--warn); }
+
+  .empty { padding: 26px 16px; text-align: center; color: var(--ink-3); font-size: 13px; line-height: 1.7; }
+  .hint { font-size: 12px; color: var(--ink-3); padding: 0 4px; line-height: 1.55; }
+  .hint b { color: var(--ink-2); font-weight: 600; }
+  .badge { font-size: 10.5px; font-weight: 650; letter-spacing: .04em;
+    background: var(--line); color: var(--ink-3); border-radius: 5px; padding: 2px 6px; }
+  .pr { font-size: 9.5px; font-weight: 700; letter-spacing: .05em;
+    background: var(--accent); color: var(--accent-ink); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+
+  /* ---------- home ---------- */
+  .next { background: var(--accent-soft); border-color: transparent; gap: 14px; }
+  .next .day { font-size: 24px; font-weight: 650; letter-spacing: -.02em;
+    display: flex; align-items: baseline; gap: 9px; }
+  .next .day span { font-size: 14px; font-weight: 550; color: var(--ink-2); }
+  .next-meta { display: flex; gap: 14px; font-size: 12.5px; color: var(--ink-2);
+    font-variant-numeric: tabular-nums; }
+  .next-meta b { color: var(--ink); font-weight: 600; }
+
+  .w-row { display: flex; align-items: center; gap: 10px; }
+  .w-val { font-size: 30px; font-weight: 650; letter-spacing: -.025em;
+    font-variant-numeric: tabular-nums; line-height: 1; }
+  .w-val small { font-size: 13px; font-weight: 550; color: var(--ink-2); margin-left: 3px; }
+  .w-btns { margin-left: auto; display: flex; gap: 6px; }
+  .w-btns button { width: 40px; height: 40px; padding: 0; border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--ink); border-radius: 10px;
+    font-family: var(--font-ui); font-size: 18px; line-height: 1; cursor: pointer; }
+  .w-save { border: 0; border-radius: 10px; background: var(--ink); color: var(--ground);
+    font-family: var(--font-ui); font-size: 13.5px; font-weight: 600;
+    padding: 10px 0; cursor: pointer; width: 100%; }
+  .w-save.saved { background: var(--accent); color: var(--accent-ink); }
+
+  .bars { display: flex; flex-direction: column; gap: 7px; }
+  .bar-row { display: grid; grid-template-columns: 62px 1fr 26px; align-items: center;
+    gap: 9px; font-size: 12.5px; }
+  .bar-row .nm { color: var(--ink-2); }
+  .bar-row .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 650; }
+  .track { position: relative; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  .band { position: absolute; top: 0; bottom: 0;
+    background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 4px; background: var(--accent); }
+  .spark { width: 100%; height: 46px; display: block; }
+
+  /* ---------- session ---------- */
+  .meters { display: flex; gap: 10px; }
+  .meter { flex: 1; background: var(--surface-2); border-radius: 10px; padding: 8px 10px;
+    display: flex; flex-direction: column; gap: 1px; }
+  .meter .k { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600; }
+  .meter .v { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums;
+    letter-spacing: -.01em; }
+  .meter .v small { font-size: 11px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+  .sesshead { padding: 0 2px 2px; display: flex; flex-direction: column; gap: 10px; }
+
+  .ex { border: 1px solid transparent; border-radius: var(--r); background: transparent; }
+  .ex.open { background: var(--surface-2); border-color: var(--line); }
+  .ex.done .head-name { color: var(--ink-3); }
+  .head { width: 100%; display: grid; grid-template-columns: 26px 1fr auto; align-items: center;
+    gap: 10px; padding: 12px; background: none; border: 0; font: inherit; color: inherit;
+    text-align: left; cursor: pointer; border-radius: var(--r); font-family: var(--font-ui); }
+  .head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .idx { font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums;
+    color: var(--ink-3); text-align: center; }
+  .ex.done .idx { color: var(--accent); }
+  .head-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .head-name { font-size: 15px; font-weight: 600; letter-spacing: -.005em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .head-sub { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .dots { display: flex; gap: 4px; align-items: center; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+  .dot.filled { background: var(--accent); border-color: var(--accent); }
+
+  .exbody { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 12px; }
+  .prev { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .prev b { color: var(--ink); font-weight: 600; }
+  .warmup { border: 1px dashed var(--line-strong); border-radius: 10px; padding: 8px 10px;
+    display: flex; flex-direction: column; gap: 3px; }
+  .warmup .k { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600; }
+  .warmup .rr { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums;
+    display: flex; justify-content: space-between; }
+
+  .setlist { display: flex; flex-direction: column; gap: 4px; }
+  .set-row { display: grid; grid-template-columns: 46px 1fr auto auto; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 9px; background: var(--surface);
+    font-variant-numeric: tabular-nums; font-size: 14px; }
+  .set-row .n { font-size: 11px; color: var(--ink-3); font-weight: 600; letter-spacing: .04em; }
+  .set-row .val { font-weight: 600; }
+  .set-row.over .val { color: var(--warn); }
+  .set-row .del { border: 0; background: none; color: var(--ink-3); cursor: pointer;
+    font-family: var(--font-ui); font-size: 15px; padding: 0 2px; line-height: 1; }
+  .set-row .del:hover { color: var(--warn); }
+  .set-row .tick { color: var(--accent); font-size: 13px; font-weight: 700; }
+
+  .input { background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .input-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .input-head .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600; }
+  .input-head .target { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .steppers { display: flex; gap: 10px; }
+  .stepper { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+  .stepper .k { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600; }
+  .ctrl { display: flex; align-items: stretch; gap: 5px; min-width: 0; }
+  .ctrl button { flex: 0 0 36px; width: 36px; padding: 0; border: 1px solid var(--line);
+    background: var(--surface-2); color: var(--ink); border-radius: 9px;
+    font-size: 18px; font-weight: 500; line-height: 1; cursor: pointer; font-family: var(--font-ui); }
+  .ctrl button:hover { border-color: var(--line-strong); }
+  .ctrl input { flex: 1 1 0; min-width: 0; width: 100%; border: 1px solid transparent;
+    background: none; color: var(--ink); font-family: var(--font-ui); font-size: 22px;
+    font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums;
+    text-align: center; border-radius: 9px; padding: 4px 0; -moz-appearance: textfield; }
+  .ctrl input::-webkit-outer-spin-button, .ctrl input::-webkit-inner-spin-button {
+    -webkit-appearance: none; margin: 0; }
+  .ctrl input:focus { outline: none; border-color: var(--accent); }
+  .guard { display: none; align-items: center; gap: 6px; background: var(--warn-soft);
+    color: var(--warn); border-radius: 9px; padding: 7px 10px; font-size: 12.5px; font-weight: 550; }
+  .guard.on { display: flex; }
+  .log-btn { width: 100%; border: 0; border-radius: 11px; background: var(--accent);
+    color: var(--accent-ink); font-family: var(--font-ui); font-size: 16px; font-weight: 650;
+    padding: 15px 0; cursor: pointer; }
+  .log-btn:active { filter: brightness(.94); }
+  .log-btn.warn { background: var(--warn); color: #fff; }
+
+  .addex { border: 1px dashed var(--line-strong); background: none; color: var(--ink-2);
+    border-radius: 12px; padding: 12px 0; font-family: var(--font-ui);
+    font-size: 13.5px; font-weight: 550; cursor: pointer; width: 100%; }
+  .addex:hover { color: var(--ink); }
+
+  .rest { flex: 0 0 auto; background: var(--ink); color: var(--ground);
+    padding: 12px 14px 14px; display: none; flex-direction: column; gap: 8px; }
+  .rest.on { display: flex; }
+  .rest-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .rest-left { display: flex; align-items: baseline; gap: 9px; }
+  .rest-k { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; opacity: .6; font-weight: 600; }
+  .rest-t { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .rest button { border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    background: none; color: inherit; border-radius: 8px; padding: 7px 11px;
+    font-family: var(--font-ui); font-size: 12.5px; font-weight: 550; cursor: pointer; }
+  .rest button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+  .rest-track { height: 3px; border-radius: 2px; overflow: hidden;
+    background: color-mix(in srgb, currentColor 22%, transparent); }
+  .rest-fill { height: 100%; width: 100%; background: var(--accent); transition: width .95s linear; }
+
+  /* ---------- history / charts ---------- */
+  .exline { padding: 12px 14px; border-top: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 5px; }
+  .exline:first-child { border-top: 0; }
+  .exline .h { display: flex; align-items: center; gap: 7px; }
+  .exline .h .n { font-size: 14.5px; font-weight: 600; }
+  .sets { display: flex; flex-wrap: wrap; gap: 5px; }
+  .set { font-size: 12.5px; font-variant-numeric: tabular-nums; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 7px; padding: 3px 8px; color: var(--ink-2); }
+  .set b { color: var(--ink); font-weight: 650; }
+  .set.top { border-color: var(--accent); }
+  .cmp { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .cmp b { color: var(--accent); font-weight: 650; }
+  .cmp.down b { color: var(--warn); }
+
+  .chartwrap { position: relative; }
+  .chartwrap svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+  .tip { position: absolute; pointer-events: none; opacity: 0; background: var(--ink);
+    color: var(--ground); border-radius: 8px; padding: 6px 9px; font-size: 11.5px;
+    font-weight: 600; line-height: 1.45; font-variant-numeric: tabular-nums; white-space: nowrap;
+    transform: translate(-50%, -120%); transition: opacity .1s ease; }
+  .tip.on { opacity: 1; }
+  .tip span { display: block; font-weight: 500; opacity: .7; font-size: 10.5px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink-2); }
+  .legend i { display: inline-flex; align-items: center; gap: 5px; font-style: normal; }
+  .key { width: 11px; height: 11px; border-radius: 3px; }
+  .key.done { background: var(--accent); }
+  .key.miss { border: 1.5px solid var(--line-strong); }
+  .key.goal { width: 14px; height: 0; border-top: 2px dashed var(--ink-2); border-radius: 0; }
+  .grid12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; }
+  .wk { display: flex; flex-direction: column; gap: 3px; align-items: center; }
+  .wk .cell { width: 100%; aspect-ratio: 1; border-radius: 4px; }
+  .wk .cell.done { background: var(--accent); }
+  .wk .cell.miss { border: 1.5px solid var(--line-strong); }
+  .wk .lb { font-size: 8.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+  /* ---------- settings ---------- */
+  .row input[type="text"] {
+    grid-column: 1 / -1; width: 100%; border: 0; background: none; color: var(--ink);
+    font-family: var(--font-ui); font-size: 17px; font-weight: 600; padding: 2px 0;
+  }
+  .row input[type="text"]:focus { outline: none; }
+  .row input[type="text"]::placeholder { color: var(--ink-3); font-weight: 500; }
+  .row.prog { align-items: start; }
+  .row.prog .t { white-space: normal; line-height: 1.4; }
+  .row.prog .r { flex-direction: column; align-items: flex-end; gap: 6px; }
+  .row.prog .stepbox button { width: 30px; height: 30px; font-size: 15px; }
+  .ord { display: flex; gap: 4px; }
+  .ord button { width: 30px; height: 30px; padding: 0; border: 1px solid var(--line);
+    background: var(--surface); color: var(--ink-2); border-radius: 8px; cursor: pointer;
+    font-family: var(--font-ui); font-size: 12px; line-height: 1; }
+  .ord button:hover { color: var(--ink); border-color: var(--line-strong); }
+  .ord button[disabled] { opacity: .35; cursor: default; }
+  textarea.json {
+    width: 100%; min-height: 130px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--surface); color: var(--ink-2); font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; padding: 10px; resize: vertical;
+  }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%);
+    background: var(--ink); color: var(--ground); border-radius: 10px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600;
+    opacity: 0; pointer-events: none; transition: opacity .18s ease; z-index: 50;
+    max-width: 88vw; text-align: center;
+  }
+  .toast.on { opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div id="shell">
+  <div id="nav"></div>
+  <div class="scroll" id="app"></div>
+  <div id="rest" class="rest">
+    <div class="rest-row">
+      <div class="rest-left"><span class="rest-k">Rest</span><span class="rest-t" id="restT">0:00</span></div>
+      <div style="display:flex;gap:8px;">
+        <button id="rest30">＋30秒</button>
+        <button id="restSkip">スキップ</button>
+      </div>
+    </div>
+    <div class="rest-track"><div class="rest-fill" id="restFill"></div></div>
+  </div>
+  <nav id="tabs" class="tabs"></nav>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* =========================================================
+     1. 定数とプリセット
+     ========================================================= */
+  var SCHEMA = 1;
+  var K = {
+    meta: "wl:meta", settings: "wl:settings", exercises: "wl:exercises",
+    programs: "wl:programs", sessions: "wl:sessions", active: "wl:active", bodyLogs: "wl:bodyLogs"
+  };
+
+  var PARTS = [
+    { id: "chest", label: "胸" }, { id: "back", label: "背中" },
+    { id: "shoulders", label: "肩" }, { id: "arms", label: "腕" },
+    { id: "legs", label: "脚" }, { id: "core", label: "体幹" }
+  ];
+  var PART_LABEL = {};
+  PARTS.forEach(function (p) { PART_LABEL[p.id] = p.label; });
+
+  var GEARS = [
+    { id: "barbell", label: "バーベル", step: 2.5, rest: 180, metric: "weight_reps" },
+    { id: "dumbbell", label: "ダンベル", step: 1, rest: 120, metric: "dumbbell_reps" },
+    { id: "machine", label: "マシン", step: 5, rest: 120, metric: "weight_reps" },
+    { id: "cable", label: "ケーブル", step: 2.5, rest: 90, metric: "weight_reps" },
+    { id: "bodyweight", label: "自重・加重", step: 2.5, rest: 180, metric: "weighted_bw" }
+  ];
+  var GEAR_LABEL = {};
+  GEARS.forEach(function (g) { GEAR_LABEL[g.id] = g.label; });
+  function gearDef(id) {
+    for (var i = 0; i < GEARS.length; i++) if (GEARS[i].id === id) return GEARS[i];
+    return GEARS[0];
+  }
+
+  var METRICS = [
+    { id: "weight_reps", label: "重量 × 回数" },
+    { id: "dumbbell_reps", label: "片手重量 × 回数" },
+    { id: "weighted_bw", label: "自重 + 加重" },
+    { id: "bodyweight_reps", label: "自重のみ" },
+    { id: "time", label: "秒数" }
+  ];
+  var METRIC_LABEL = {};
+  METRICS.forEach(function (m) { METRIC_LABEL[m.id] = m.label; });
+
+  function ex(id, name, part, gear, metric, step, rest, lo, hi, w0) {
+    return {
+      id: id, name: name, part: part, gear: gear, metric: metric,
+      step: step, restSec: rest, repLo: lo, repHi: hi,
+      defaultWeight: w0, autoProgress: true, videoUrl: null,
+      goal1RM: 0, isPreset: true, archived: false
+    };
+  }
+
+  var PRESET_EXERCISES = [
+    ex("ex_bench_press", "ベンチプレス", "chest", "barbell", "weight_reps", 2.5, 180, 5, 8, 60),
+    ex("ex_incline_db_press", "インクラインダンベルプレス", "chest", "dumbbell", "dumbbell_reps", 1, 120, 8, 12, 16),
+    ex("ex_db_fly", "ダンベルフライ", "chest", "dumbbell", "dumbbell_reps", 1, 90, 10, 15, 10),
+    ex("ex_chest_press", "チェストプレス", "chest", "machine", "weight_reps", 5, 120, 8, 12, 40),
+    ex("ex_weighted_pullup", "加重懸垂", "back", "bodyweight", "weighted_bw", 2.5, 180, 8, 8, 0),
+    ex("ex_lat_pulldown", "ラットプルダウン", "back", "machine", "weight_reps", 5, 120, 8, 12, 45),
+    ex("ex_seated_row", "シーテッドロー", "back", "machine", "weight_reps", 5, 120, 8, 12, 45),
+    ex("ex_bb_row", "ベントオーバーロー", "back", "barbell", "weight_reps", 2.5, 150, 6, 10, 40),
+    ex("ex_shoulder_press", "ショルダープレス", "shoulders", "dumbbell", "dumbbell_reps", 1, 120, 8, 12, 14),
+    ex("ex_side_raise", "サイドレイズ", "shoulders", "dumbbell", "dumbbell_reps", 1, 90, 12, 20, 6),
+    ex("ex_rear_raise", "リアレイズ", "shoulders", "dumbbell", "dumbbell_reps", 1, 90, 12, 20, 5),
+    ex("ex_incline_db_curl", "インクラインダンベルカール", "arms", "dumbbell", "dumbbell_reps", 1, 60, 10, 15, 7),
+    ex("ex_pushdown", "ケーブルプレスダウン", "arms", "cable", "weight_reps", 2.5, 60, 10, 15, 30),
+    ex("ex_skull_crusher", "スカルクラッシャー", "arms", "barbell", "weight_reps", 2.5, 90, 8, 12, 20),
+    ex("ex_squat", "バーベルスクワット", "legs", "barbell", "weight_reps", 2.5, 180, 5, 8, 50),
+    ex("ex_rdl", "ルーマニアンデッドリフト", "legs", "barbell", "weight_reps", 2.5, 150, 8, 10, 40),
+    ex("ex_bulgarian", "ブルガリアンスクワット", "legs", "dumbbell", "dumbbell_reps", 1, 120, 10, 12, 10),
+    ex("ex_leg_curl", "レッグカール", "legs", "machine", "weight_reps", 5, 90, 12, 15, 30),
+    ex("ex_leg_press", "レッグプレス", "legs", "machine", "weight_reps", 5, 120, 8, 12, 80),
+    ex("ex_calf_raise", "カーフレイズ", "legs", "machine", "weight_reps", 5, 60, 15, 20, 40),
+    ex("ex_ab_roller", "アブローラー", "core", "bodyweight", "bodyweight_reps", 0, 60, 10, 15, 0),
+    ex("ex_plank", "プランク", "core", "bodyweight", "time", 0, 60, 45, 60, 0)
+  ];
+  /* 主要種目の当面の目標（現行プログラムの8週後マイルストーン） */
+  PRESET_EXERCISES.forEach(function (e) {
+    var g = { ex_bench_press: 92, ex_squat: 95, ex_weighted_pullup: 87, ex_rdl: 80 }[e.id];
+    if (g) e.goal1RM = g;
+  });
+
+  var PRESET_PROGRAMS = [
+    { id: "prog_a", label: "Day A・上半身", archived: false, items: [
+      { exerciseId: "ex_bench_press", targetSets: 4 },
+      { exerciseId: "ex_weighted_pullup", targetSets: 4 },
+      { exerciseId: "ex_incline_db_press", targetSets: 3 },
+      { exerciseId: "ex_shoulder_press", targetSets: 3 },
+      { exerciseId: "ex_seated_row", targetSets: 3 },
+      { exerciseId: "ex_side_raise", targetSets: 3 },
+      { exerciseId: "ex_incline_db_curl", targetSets: 2 },
+      { exerciseId: "ex_pushdown", targetSets: 2 }
+    ]},
+    { id: "prog_b", label: "Day B・下半身 + 体幹", archived: false, items: [
+      { exerciseId: "ex_squat", targetSets: 4 },
+      { exerciseId: "ex_rdl", targetSets: 3 },
+      { exerciseId: "ex_bulgarian", targetSets: 3 },
+      { exerciseId: "ex_leg_curl", targetSets: 3 },
+      { exerciseId: "ex_calf_raise", targetSets: 3 },
+      { exerciseId: "ex_ab_roller", targetSets: 3 },
+      { exerciseId: "ex_plank", targetSets: 2 }
+    ]}
+  ];
+
+  var DEFAULT_SETTINGS = {
+    heightCm: 172.4,
+    goalPhase: "bulk",
+    weeklyTarget: 2,
+    theme: "system",
+    startWeight: 59.0,
+    mainExerciseIds: ["ex_bench_press", "ex_weighted_pullup", "ex_squat", "ex_rdl"]
+  };
+
+  /* =========================================================
+     2. ストレージ
+     ========================================================= */
+  var DB = {};
+  var readOnly = false;
+  /* 保存できない環境（プレビュー用のサンドボックスなど）を起動時に1度だけ判定する。
+     判定しないと、セットを記録するたびに保存エラーが出て使いものにならない。 */
+  var storageOK = (function () {
+    try { localStorage.setItem("wl:probe", "1"); localStorage.removeItem("wl:probe"); return true; }
+    catch (e) { return false; }
+  })();
+
+  function rid(prefix) {
+    var s = "";
+    for (var i = 0; i < 12; i++) s += "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)];
+    return prefix + "_" + s;
+  }
+  function getRaw(key, fallback) {
+    try {
+      var v = localStorage.getItem(key);
+      return v === null ? fallback : JSON.parse(v);
+    } catch (e) { return fallback; }
+  }
+  function hasKey(key) {
+    try { return localStorage.getItem(key) !== null; } catch (e) { return true; }
+  }
+  function setRaw(key, val) {
+    if (readOnly || !storageOK) return;
+    try { localStorage.setItem(key, JSON.stringify(val)); }
+    catch (e) { toast("保存できませんでした（容量不足の可能性）"); }
+  }
+  function touch() {
+    DB.meta.updatedAt = new Date().toISOString();
+    setRaw(K.meta, DB.meta);
+  }
+  function save(what) {
+    if (what === "exercises") setRaw(K.exercises, DB.exercises);
+    if (what === "programs") setRaw(K.programs, DB.programs);
+    if (what === "sessions") setRaw(K.sessions, DB.sessions);
+    if (what === "active") { if (DB.active) setRaw(K.active, DB.active); else localStorage.removeItem(K.active); }
+    if (what === "bodyLogs") setRaw(K.bodyLogs, DB.bodyLogs);
+    if (what === "settings") setRaw(K.settings, DB.settings);
+    touch();
+  }
+
+  function migrate(meta) {
+    /* schemaVersion が上がったら、ここに変換を足していく。
+       例: if (meta.schemaVersion < 2) { ...; meta.schemaVersion = 2; } */
+    return meta;
+  }
+
+  function load() {
+    var meta = getRaw(K.meta, null);
+    if (!meta) {
+      meta = { schemaVersion: SCHEMA, updatedAt: new Date().toISOString() };
+      DB.meta = meta;
+      DB.settings = clone(DEFAULT_SETTINGS);
+      DB.exercises = clone(PRESET_EXERCISES);
+      DB.programs = clone(PRESET_PROGRAMS);
+      DB.sessions = [];
+      DB.bodyLogs = [];
+      DB.active = null;
+      setRaw(K.meta, DB.meta); setRaw(K.settings, DB.settings);
+      setRaw(K.exercises, DB.exercises); setRaw(K.programs, DB.programs);
+      setRaw(K.sessions, DB.sessions); setRaw(K.bodyLogs, DB.bodyLogs);
+      return;
+    }
+    if (meta.schemaVersion > SCHEMA) {
+      readOnly = true;
+      alert("このデータは新しいバージョンのアプリで作られています。データを壊さないため、書き込みを停止しました。アプリを更新してください。");
+    } else if (meta.schemaVersion < SCHEMA) {
+      meta = migrate(meta);
+      setRaw(K.meta, meta);
+    }
+    DB.meta = meta;
+    DB.settings = Object.assign(clone(DEFAULT_SETTINGS), getRaw(K.settings, {}));
+    DB.exercises = getRaw(K.exercises, null) || clone(PRESET_EXERCISES);
+    DB.programs = getRaw(K.programs, null) || clone(PRESET_PROGRAMS);
+    DB.sessions = getRaw(K.sessions, null) || [];
+    DB.bodyLogs = getRaw(K.bodyLogs, null) || [];
+    DB.active = getRaw(K.active, null);
+    /* 欠けているコレクションは書き戻す（部分的に消えた状態を残さない） */
+    ["settings", "exercises", "programs", "sessions", "bodyLogs"].forEach(function (name) {
+      if (!hasKey(K[name])) setRaw(K[name], DB[name]);
+    });
+  }
+  function clone(x) { return JSON.parse(JSON.stringify(x)); }
+
+  /* =========================================================
+     3. 導出（保存しない・毎回計算する）
+     ========================================================= */
+  function exById(id) {
+    for (var i = 0; i < DB.exercises.length; i++) if (DB.exercises[i].id === id) return DB.exercises[i];
+    return null;
+  }
+  function progById(id) {
+    for (var i = 0; i < DB.programs.length; i++) if (DB.programs[i].id === id) return DB.programs[i];
+    return null;
+  }
+  function setVolume(metric, w, r, bw) {
+    if (metric === "weight_reps") return w * r;
+    if (metric === "dumbbell_reps") return w * 2 * r;
+    if (metric === "weighted_bw") return (bw + w) * r;
+    if (metric === "bodyweight_reps") return bw * r;
+    return 0;
+  }
+  function sessionVolume(s) {
+    var v = 0;
+    s.exercises.forEach(function (se) {
+      se.sets.forEach(function (st) { v += setVolume(se.snapshot.metric, st.weight, st.reps, s.bodyWeightAtTime); });
+    });
+    return v;
+  }
+  function sessionSetCount(s) {
+    var n = 0;
+    s.exercises.forEach(function (se) { n += se.sets.length; });
+    return n;
+  }
+  function e1rm(metric, w, r, bw) {
+    if (metric === "time" || metric === "bodyweight_reps") return 0;
+    var base = metric === "weighted_bw" ? bw + w : w;
+    return base * (1 + r / 30);
+  }
+  function exerciseTopRm(se, bw) {
+    var top = 0;
+    se.sets.forEach(function (st) {
+      var v = e1rm(se.snapshot.metric, st.weight, st.reps, bw);
+      if (v > top) top = v;
+    });
+    return Math.round(top * 10) / 10;
+  }
+  /* 完了セッションを新しい順に */
+  function doneSessions() {
+    return DB.sessions.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+  }
+  function recordsOf(exerciseId) {
+    var out = [];
+    doneSessions().forEach(function (s) {
+      s.exercises.forEach(function (se) {
+        if (se.exerciseId === exerciseId && se.sets.length) out.push({ s: s, se: se, rm: exerciseTopRm(se, s.bodyWeightAtTime) });
+      });
+    });
+    return out; // 新しい順
+  }
+  function bestRm(exerciseId) {
+    return recordsOf(exerciseId).reduce(function (a, r) { return Math.max(a, r.rm); }, 0);
+  }
+  /* 直近7日の部位別セット数 */
+  function partSetCounts() {
+    var since = new Date(); since.setDate(since.getDate() - 6);
+    var key = dateKey(since);
+    var counts = {};
+    PARTS.forEach(function (p) { counts[p.id] = 0; });
+    DB.sessions.forEach(function (s) {
+      if (s.date < key) return;
+      s.exercises.forEach(function (se) { counts[se.snapshot.part] += se.sets.length; });
+    });
+    return counts;
+  }
+  /* 重量アップの提案 */
+  function suggestWeight(exerciseId) {
+    var e = exById(exerciseId);
+    var recs = recordsOf(exerciseId);
+    if (!recs.length) return e ? e.defaultWeight : 0;
+    var last = recs[0];
+    var w = last.se.sets[last.se.sets.length - 1].weight;
+    if (!e || !e.autoProgress || e.metric === "time" || e.metric === "bodyweight_reps") return w;
+    var allHit = last.se.sets.length >= last.se.plannedSets &&
+      last.se.sets.every(function (st) { return st.reps >= last.se.snapshot.repHi; });
+    return allHit ? Math.round((w + e.step) * 10) / 10 : w;
+  }
+  function currentBodyWeight() {
+    if (DB.bodyLogs.length) return DB.bodyLogs[DB.bodyLogs.length - 1].weight;
+    return DB.settings.startWeight;
+  }
+
+  /* =========================================================
+     4. 小道具
+     ========================================================= */
+  var DAYS = ["日", "月", "火", "水", "木", "金", "土"];
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function dateKey(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function parseKey(k) { var p = k.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function md(k) { var d = parseKey(k); return (d.getMonth() + 1) + "/" + d.getDate(); }
+  function dow(k) { return DAYS[parseKey(k).getDay()]; }
+  function ymLabel(k) { var d = parseKey(k); return d.getFullYear() + "年" + (d.getMonth() + 1) + "月"; }
+  function fmtInt(n) { return Math.round(n).toLocaleString("ja-JP"); }
+  function fmtW(n) { return (Math.round(n * 10) / 10).toString(); }
+  function mmss(s) { var m = Math.floor(s / 60); return m + ":" + pad(s % 60); }
+  function elapsed(iso) {
+    var s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+    return pad(Math.floor(s / 60)) + ":" + pad(s % 60);
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function el(tag, cls, html) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (html !== undefined) n.innerHTML = html;
+    return n;
+  }
+  var toastTimer = null;
+  function toast(msg) {
+    var t = document.getElementById("toast");
+    t.textContent = msg; t.className = "toast on";
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.className = "toast"; }, 2200);
+  }
+  function setLabel(metric, w, r) {
+    if (metric === "time") return r + "秒";
+    if (metric === "bodyweight_reps") return "自重 × " + r;
+    if (metric === "weighted_bw") return (w ? "+" + fmtW(w) + "kg" : "自重") + " × " + r;
+    if (metric === "dumbbell_reps") return fmtW(w) + "kg×2 × " + r;
+    return fmtW(w) + "kg × " + r;
+  }
+  function weightLabel(metric, w) {
+    if (metric === "time" || metric === "bodyweight_reps") return "自重";
+    if (metric === "weighted_bw") return w ? "+" + fmtW(w) + "kg" : "自重";
+    if (metric === "dumbbell_reps") return fmtW(w) + "kg×2";
+    return fmtW(w) + "kg";
+  }
+  function repLabel(lo, hi, metric) {
+    var u = metric === "time" ? "秒" : "回";
+    return lo === hi ? lo + u : lo + "〜" + hi + u;
+  }
+
+  /* =========================================================
+     5. 状態とルーティング
+     ========================================================= */
+  var S = {
+    tab: "home",
+    stack: [],            // {name, arg}
+    openExIdx: 0,
+    weightDraft: null,
+    settingsFilter: "すべて",
+    settingsQuery: "",
+    histTab: 0,
+    histQuery: "",
+    chartRange: 8,
+    chartLift: null,
+    draftExercise: null
+  };
+  function here() { return S.stack.length ? S.stack[S.stack.length - 1] : { name: S.tab, arg: null }; }
+  function push(name, arg) { S.stack.push({ name: name, arg: arg }); render(); scrollTop(); }
+  function pop() { S.stack.pop(); render(); scrollTop(); }
+  function goTab(t) { S.tab = t; S.stack = []; render(); scrollTop(); }
+  function scrollTop() { document.getElementById("app").scrollTop = 0; }
+
+  var appEl = document.getElementById("app");
+  var navEl = document.getElementById("nav");
+  var tabsEl = document.getElementById("tabs");
+
+  var TABS = [
+    { id: "home", label: "ホーム", icon: '<path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>' },
+    { id: "history", label: "履歴", icon: '<path d="M4 6h16M4 12h16M4 18h10"/>' },
+    { id: "charts", label: "グラフ", icon: '<path d="M4 19V5M4 19h16M8 15l4-5 3 3 5-7"/>' },
+    { id: "settings", label: "設定", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4m0-12.8-1.4 1.4m-10 10-1.4 1.4"/>' }
+  ];
+
+  function render() {
+    var v = here();
+    appEl.innerHTML = "";
+    navEl.className = "nav";
+    tabsEl.style.display = v.name === "session" ? "none" : "";
+    document.getElementById("rest").style.display = v.name === "session" && restLeft > 0 ? "flex" : "none";
+
+    var R = {
+      home: [viewHome, null], session: [viewSession, null],
+      history: [viewHistory, null], sessionDetail: [viewSessionDetail, null],
+      exerciseHistory: [viewExerciseHistory, null],
+      charts: [viewCharts, null], settings: [viewSettings, null],
+      exerciseList: [viewExerciseList, null], exerciseEdit: [viewExerciseEdit, null],
+      exerciseNew: [viewExerciseNew, null], programEdit: [viewProgramEdit, null],
+      data: [viewData, null]
+    };
+    (R[v.name] || R.home)[0](v.arg);
+    renderTabs();
+  }
+
+  function nav(title, opts) {
+    opts = opts || {};
+    navEl.innerHTML = "";
+    if (opts.plain) {
+      navEl.className = "nav plain";
+      navEl.appendChild(el("h1", null, esc(title)));
+      var r = el("span", "sub", opts.sub || "");
+      navEl.appendChild(r);
+      return;
+    }
+    var back = el("button", "navbtn back", "←");
+    back.setAttribute("aria-label", "戻る");
+    back.style.visibility = S.stack.length ? "visible" : "hidden";
+    back.addEventListener("click", function () { opts.onBack ? opts.onBack() : pop(); });
+    navEl.appendChild(back);
+    navEl.appendChild(el("h1", null, esc(title)));
+    if (opts.action) {
+      var a = el("button", "navbtn right", esc(opts.action));
+      a.addEventListener("click", opts.onAction);
+      navEl.appendChild(a);
+    } else navEl.appendChild(el("span"));
+  }
+
+  function renderTabs() {
+    tabsEl.innerHTML = "";
+    TABS.forEach(function (t) {
+      var b = el("button", "tab" + (S.tab === t.id ? " on" : ""),
+        '<svg viewBox="0 0 24 24">' + t.icon + "</svg>" + t.label);
+      b.addEventListener("click", function () { goTab(t.id); });
+      tabsEl.appendChild(b);
+    });
+  }
+
+  function group(k, right, note) {
+    var g = el("div", "group");
+    if (k) g.appendChild(el("div", "gk", esc(k) + (right ? "<span>" + esc(right) + "</span>" : "")));
+    var p = el("div", "panel");
+    g.appendChild(p);
+    if (note) g.appendChild(el("div", "gnote", esc(note)));
+    appEl.appendChild(g);
+    return p;
+  }
+  function rowBtn(p, title, sub, right, fn, dim) {
+    var b = el("button", "row" + (dim ? " dim" : ""));
+    b.innerHTML = '<span class="main"><span class="t">' + title + "</span>" +
+      (sub ? '<span class="s">' + sub + "</span>" : "") + "</span>" +
+      '<span class="r">' + (right || "") + '<span class="chev">›</span></span>';
+    if (fn) b.addEventListener("click", fn); else b.disabled = true;
+    p.appendChild(b);
+    return b;
+  }
+  function stepRow(p, label, sub, value, dec, inc) {
+    var d = el("div", "row");
+    d.innerHTML = '<span class="main"><span class="t">' + esc(label) + "</span>" +
+      (sub ? '<span class="s">' + esc(sub) + "</span>" : "") + "</span>";
+    var box = el("span", "stepbox");
+    var b1 = el("button", null, "−"); b1.setAttribute("aria-label", label + "を減らす");
+    var v = el("span", "v", value);
+    var b2 = el("button", null, "＋"); b2.setAttribute("aria-label", label + "を増やす");
+    b1.addEventListener("click", dec); b2.addEventListener("click", inc);
+    box.appendChild(b1); box.appendChild(v); box.appendChild(b2);
+    d.appendChild(box); p.appendChild(d);
+  }
+  function chipRow(p, list, cur, fn) {
+    var c = el("div", "chips");
+    list.forEach(function (x) {
+      var b = el("button", "chip" + (x.id === cur ? " on" : ""), esc(x.label));
+      b.addEventListener("click", function () { fn(x.id); });
+      c.appendChild(b);
+    });
+    p.appendChild(c);
+  }
+  function switchRow(p, label, sub, on, fn) {
+    var d = el("div", "row");
+    d.innerHTML = '<span class="main"><span class="t">' + esc(label) + "</span>" +
+      (sub ? '<span class="s">' + esc(sub) + "</span>" : "") + "</span>";
+    var s = el("button", "sw" + (on ? " on" : ""));
+    s.setAttribute("role", "switch");
+    s.setAttribute("aria-checked", on ? "true" : "false");
+    s.setAttribute("aria-label", label);
+    s.addEventListener("click", fn);
+    d.appendChild(s); p.appendChild(d);
+  }
+
+  /* =========================================================
+     6. ホーム
+     ========================================================= */
+  function nextProgram() {
+    var done = doneSessions();
+    for (var i = 0; i < done.length; i++) {
+      if (done[i].programId) {
+        var p = progById(done[i].programId === "prog_a" ? "prog_b" : "prog_a");
+        if (p) return p;
+      }
+    }
+    return DB.programs.filter(function (p) { return !p.archived; })[0] || null;
+  }
+  function weekCount() {
+    var d = new Date();
+    var day = (d.getDay() + 6) % 7; // 月曜起点
+    var mon = new Date(d); mon.setDate(d.getDate() - day);
+    var k = dateKey(mon);
+    return DB.sessions.filter(function (s) { return s.date >= k; }).length;
+  }
+
+  function viewHome() {
+    nav("今日", { plain: true, sub: "今週 " + weekCount() + " / " + DB.settings.weeklyTarget + " 回" });
+
+    if (!storageOK) {
+      appEl.appendChild(el("div", "card",
+        '<div class="empty">この画面では記録が保存されません。<br>' +
+        '操作は一通り試せますが、閉じると消えます。<br>実際に使うときは公開したURLから開いてください。</div>'));
+    }
+
+    var today = new Date();
+    appEl.appendChild(el("div", "gk",
+      (today.getMonth() + 1) + "月" + today.getDate() + "日（" + DAYS[today.getDay()] + "）"));
+
+    /* --- 次のトレーニング --- */
+    var c = el("div", "card next");
+    if (DB.active) {
+      var ap = DB.active.programId ? progById(DB.active.programId) : null;
+      c.innerHTML =
+        '<div><div class="card-k" style="margin-bottom:6px;">実施中のトレーニング</div>' +
+        '<div class="day">' + esc(ap ? ap.label.split("・")[0] : "記録中") +
+        "<span>" + esc(ap ? (ap.label.split("・")[1] || "") : "") + "</span></div></div>" +
+        '<div class="next-meta"><span>開始から <b>' + elapsed(DB.active.startedAt) + "</b></span>" +
+        "<span>記録 <b>" + sessionSetCount(DB.active) + "</b> セット</span></div>";
+      var go = el("button", "primary big", "続きから再開する");
+      go.addEventListener("click", function () { S.openExIdx = firstUndone(DB.active); push("session"); });
+      c.appendChild(go);
+      var dis = el("button", "linkbtn", "このセッションを破棄する");
+      dis.addEventListener("click", function () {
+        if (!confirm("記録中のセッションを破棄します。よろしいですか？")) return;
+        DB.active = null; save("active"); render();
+      });
+      c.appendChild(dis);
+    } else {
+      var prog = S.pendingProgram ? progById(S.pendingProgram) : nextProgram();
+      if (!prog) {
+        c.innerHTML = '<div class="empty">プログラムがありません。設定から作ってください。</div>';
+      } else {
+        var parts = prog.label.split("・");
+        var last = doneSessions().filter(function (s) { return s.programId === prog.id; })[0];
+        var days = last ? Math.round((Date.now() - parseKey(last.date).getTime()) / 86400000) : null;
+        c.innerHTML =
+          '<div><div class="card-k" style="margin-bottom:6px;">次のトレーニング</div>' +
+          '<div class="day">' + esc(parts[0]) + "<span>" + esc(parts[1] || "") + "</span></div></div>" +
+          '<div class="next-meta">' +
+          (days !== null ? "<span>前回から <b>" + days + "日</b></span>" : "<span>初回</span>") +
+          "<span><b>" + prog.items.length + "</b> 種目</span></div>";
+        var start = el("button", "primary big", "始める");
+        start.addEventListener("click", function () { startSession(prog.id); });
+        c.appendChild(start);
+        var other = DB.programs.filter(function (p) { return !p.archived && p.id !== prog.id; })[0];
+        if (other) {
+          var sw = el("button", "linkbtn", other.label + " に切り替える");
+          sw.addEventListener("click", function () { S.pendingProgram = other.id; render(); });
+          c.appendChild(sw);
+        }
+      }
+    }
+    appEl.appendChild(c);
+
+    /* --- 体重 --- */
+    var bw = S.weightDraft === null ? currentBodyWeight() : S.weightDraft;
+    var wc = el("div", "card");
+    var recent = DB.bodyLogs.slice(-8);
+    var deltaTxt = "";
+    if (DB.bodyLogs.length >= 2) {
+      var d0 = DB.bodyLogs[DB.bodyLogs.length - 1].weight - DB.bodyLogs[0].weight;
+      deltaTxt = "記録開始から " + (d0 >= 0 ? "+" : "") + fmtW(d0) + "kg";
+    } else deltaTxt = "朝イチ・排尿後に測る";
+    wc.innerHTML =
+      '<div class="card-head"><span class="card-k">体重</span>' +
+      '<span class="card-note">' + esc(deltaTxt) + "</span></div>" +
+      '<div class="w-row"><div><div class="w-val">' + fmtW(bw) + "<small>kg</small></div></div></div>";
+    var wr = wc.querySelector(".w-row");
+    var btns = el("div", "w-btns");
+    var minus = el("button", null, "−"); minus.setAttribute("aria-label", "体重を減らす");
+    var plus = el("button", null, "＋"); plus.setAttribute("aria-label", "体重を増やす");
+    minus.addEventListener("click", function () { S.weightDraft = Math.round((bw - 0.1) * 10) / 10; render(); });
+    plus.addEventListener("click", function () { S.weightDraft = Math.round((bw + 0.1) * 10) / 10; render(); });
+    btns.appendChild(minus); btns.appendChild(plus);
+    wr.appendChild(btns);
+
+    if (recent.length >= 2) {
+      var sv = el("div");
+      sv.innerHTML = '<svg class="spark" viewBox="0 0 320 46" preserveAspectRatio="none"></svg>';
+      spark(sv.querySelector("svg"), recent.map(function (b) { return b.weight; }));
+      wc.appendChild(sv);
+    }
+    var wsave = el("button", "w-save", "今日の体重を記録");
+    wsave.addEventListener("click", function () {
+      var k = dateKey(new Date());
+      var found = false;
+      DB.bodyLogs.forEach(function (b) { if (b.date === k) { b.weight = bw; found = true; } });
+      if (!found) DB.bodyLogs.push({ date: k, weight: bw });
+      DB.bodyLogs.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+      save("bodyLogs");
+      S.weightDraft = null;
+      toast(fmtW(bw) + "kg を記録しました");
+      render();
+    });
+    wc.appendChild(wsave);
+    appEl.appendChild(wc);
+
+    if (!DB.sessions.length) {
+      var e = el("div", "card");
+      e.innerHTML = '<div class="empty">記録がまだありません。<br>1回トレーニングを記録すると、ここに部位別のセット数と伸びが出ます。</div>';
+      appEl.appendChild(e);
+      var demo = el("button", "ghost", "サンプルデータを入れて画面を確認する");
+      demo.style.flex = "none";
+      demo.addEventListener("click", seedDemo);
+      appEl.appendChild(demo);
+      return;
+    }
+
+    /* --- 部位別セット数 --- */
+    var counts = partSetCounts();
+    var pc = el("div", "card");
+    pc.innerHTML = '<div class="card-head"><span class="card-k">直近7日の部位別セット数</span></div>' +
+      '<div class="bars">' + PARTS.map(function (p) {
+        var LO = 10, HI = 16, SC = 18;
+        return '<div class="bar-row"><span class="nm">' + p.label + "</span>" +
+          '<span class="track"><span class="band" style="left:' + (LO / SC * 100) + "%;width:" +
+          ((HI - LO) / SC * 100) + '%"></span>' +
+          '<span class="fill" style="width:' + Math.min(100, counts[p.id] / SC * 100) + '%"></span></span>' +
+          '<span class="num">' + counts[p.id] + "</span></div>";
+      }).join("") + "</div>" +
+      '<div class="card-note">帯は筋肥大の目安 10〜16セット</div>';
+    appEl.appendChild(pc);
+
+    /* --- 主要種目の推定1RM --- */
+    var mainId = DB.settings.mainExerciseIds.filter(function (id) { return recordsOf(id).length >= 2; })[0];
+    if (mainId) {
+      var e2 = exById(mainId);
+      var recs = recordsOf(mainId).slice().reverse();
+      var rc = el("div", "card");
+      rc.innerHTML =
+        '<div class="card-head"><span class="card-k">' + esc(e2.name) + " 推定1RM</span>" +
+        '<span class="card-note">過去' + recs.length + "回</span></div>" +
+        '<div class="hero"><span class="n">' + recs[recs.length - 1].rm + "<small>kg</small></span></div>" +
+        '<svg class="spark" viewBox="0 0 320 46" preserveAspectRatio="none"></svg>';
+      spark(rc.querySelector("svg"), recs.map(function (r) { return r.rm; }));
+      appEl.appendChild(rc);
+    }
+
+    /* --- 直近のトレーニング --- */
+    var p2 = group("直近のトレーニング");
+    doneSessions().slice(0, 4).forEach(function (s) {
+      var prog2 = s.programId ? progById(s.programId) : null;
+      var b = el("button", "row dated");
+      b.innerHTML =
+        '<span class="dt">' + parseKey(s.date).getDate() + "<small>" + dow(s.date) + "</small></span>" +
+        '<span class="main"><span class="t">' + esc(prog2 ? prog2.label : "記録") + "</span>" +
+        '<span class="s">' + s.exercises.filter(function (x) { return x.sets.length; }).length +
+        "種目 ・ " + sessionSetCount(s) + "セット</span></span>" +
+        '<span class="r"><span class="v">' + fmtInt(sessionVolume(s)) + "<small>kg</small></span></span>";
+      b.addEventListener("click", function () { S.tab = "history"; S.stack = []; push("sessionDetail", s.id); });
+      p2.appendChild(b);
+    });
+  }
+
+  function spark(svg, vals) {
+    var W = 320, H = 46, pad = 5;
+    var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
+    var span = (max - min) || 1;
+    var pts = vals.map(function (v, i) {
+      return [pad + i * (W - pad * 2) / Math.max(1, vals.length - 1),
+        H - pad - (v - min) / span * (H - pad * 2)];
+    });
+    var line = pts.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
+    var last = pts[pts.length - 1];
+    svg.innerHTML =
+      '<polyline points="' + line + '" fill="none" stroke="var(--accent)" stroke-width="2" ' +
+      'stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>' +
+      '<circle cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="3.2" ' +
+      'fill="var(--accent)" stroke="var(--surface-2)" stroke-width="2"></circle>';
+  }
+
+  /* =========================================================
+     7. セッション
+     ========================================================= */
+  function startSession(programId) {
+    var prog = progById(programId);
+    if (!prog) return;
+    var bw = currentBodyWeight();
+    var s = {
+      id: rid("ses"), programId: prog.id, date: dateKey(new Date()),
+      startedAt: new Date().toISOString(), endedAt: null,
+      bodyWeightAtTime: bw, note: "",
+      exercises: prog.items.map(function (it) {
+        var e = exById(it.exerciseId);
+        if (!e) return null;
+        return {
+          exerciseId: e.id,
+          snapshot: { name: e.name, part: e.part, metric: e.metric, repLo: e.repLo, repHi: e.repHi, restSec: e.restSec },
+          plannedSets: it.targetSets, sets: [], skipped: false
+        };
+      }).filter(Boolean)
+    };
+    DB.active = s;
+    S.pendingProgram = null;
+    S.openExIdx = 0;
+    save("active");
+    push("session");
+  }
+  function firstUndone(s) {
+    for (var i = 0; i < s.exercises.length; i++) {
+      var se = s.exercises[i];
+      if (!se.skipped && se.sets.length < se.plannedSets) return i;
+    }
+    return -1;
+  }
+  function seDone(se) { return se.skipped || se.sets.length >= se.plannedSets; }
+
+  function viewSession() {
+    var s = DB.active;
+    if (!s) { pop(); return; }
+    var prog = s.programId ? progById(s.programId) : null;
+    nav(prog ? prog.label : "記録", {
+      onBack: function () { pop(); },
+      action: "終了", onAction: finishSession
+    });
+
+    var head = el("div", "sesshead");
+    var doneCount = s.exercises.filter(seDone).length;
+    var planned = s.exercises.reduce(function (a, x) { return a + Math.max(x.plannedSets, x.sets.length); }, 0);
+    head.innerHTML =
+      '<div class="meters">' +
+      '<div class="meter"><div class="k">種目</div><div class="v">' + doneCount +
+      "<small>/ " + s.exercises.length + "</small></div></div>" +
+      '<div class="meter"><div class="k">セット</div><div class="v">' + sessionSetCount(s) +
+      "<small>/ " + planned + "</small></div></div>" +
+      '<div class="meter"><div class="k">総挙上量</div><div class="v">' + fmtInt(sessionVolume(s)) +
+      "<small>kg</small></div></div></div>";
+    appEl.appendChild(head);
+
+    s.exercises.forEach(function (se, idx) {
+      appEl.appendChild(exerciseCard(s, se, idx));
+    });
+
+    var add = el("button", "addex", "＋ 種目を追加");
+    add.addEventListener("click", function () { push("exerciseList", { pick: "session" }); });
+    appEl.appendChild(add);
+
+    var fin = el("button", "primary", "トレーニングを終了する");
+    fin.addEventListener("click", finishSession);
+    appEl.appendChild(fin);
+  }
+
+  function exerciseCard(s, se, idx) {
+    var open = S.openExIdx === idx;
+    var done = seDone(se);
+    var card = el("article", "ex" + (open ? " open" : "") + (done ? " done" : ""));
+    var total = Math.max(se.plannedSets, se.sets.length);
+    var dots = "";
+    for (var i = 0; i < total; i++) dots += '<span class="dot' + (i < se.sets.length ? " filled" : "") + '"></span>';
+
+    var m = se.snapshot.metric;
+    var sub = se.sets.length
+      ? se.sets.map(function (x) { return x.reps; }).join(", ") + (m === "time" ? "秒" : "回")
+      : weightLabel(m, suggestWeight(se.exerciseId)) + " ・ " +
+        repLabel(se.snapshot.repLo, se.snapshot.repHi, m) + " × " + se.plannedSets;
+
+    var head = el("button", "head");
+    head.setAttribute("aria-expanded", open ? "true" : "false");
+    head.innerHTML =
+      '<span class="idx">' + (done ? "✓" : idx + 1) + "</span>" +
+      '<span class="head-main"><span class="head-name">' + esc(se.snapshot.name) + "</span>" +
+      '<span class="head-sub">' + esc(sub) + "</span></span>" +
+      '<span class="dots">' + dots + "</span>";
+    head.addEventListener("click", function () { S.openExIdx = open ? -1 : idx; render(); });
+    card.appendChild(head);
+    if (!open) return card;
+
+    var body = el("div", "exbody");
+
+    /* 前回 */
+    var recs = recordsOf(se.exerciseId);
+    var prevTxt = recs.length
+      ? "前回 " + md(recs[0].s.date) + " ・ " +
+        recs[0].se.sets.map(function (x) { return setLabel(m, x.weight, x.reps); }).join(" / ")
+      : "この種目の記録はまだありません";
+    body.appendChild(el("div", "prev", esc(prevTxt)));
+
+    /* ウォームアップ（表示のみ・記録しない） */
+    var wNow = se.sets.length ? se.sets[se.sets.length - 1].weight : suggestWeight(se.exerciseId);
+    if (se.snapshot.restSec >= 150 && (m === "weight_reps" || m === "weighted_bw")) {
+      var rows;
+      if (m === "weighted_bw") rows = [["自重", "5回"]];
+      else rows = [
+        [fmtW(Math.round(wNow * 0.5 / 2.5) * 2.5) + "kg（50%）", "5回"],
+        [fmtW(Math.round(wNow * 0.75 / 2.5) * 2.5) + "kg（75%）", "3回"]
+      ];
+      body.appendChild(el("div", "warmup",
+        '<div class="k">ウォームアップ（記録しない）</div>' +
+        rows.map(function (r) { return '<div class="rr"><span>' + r[0] + "</span><span>" + r[1] + "</span></div>"; }).join("")));
+    }
+
+    /* 記録済みセット */
+    if (se.sets.length) {
+      var list = el("div", "setlist");
+      se.sets.forEach(function (st, i) {
+        var row = el("div", "set-row" + (st.reps > se.snapshot.repHi ? " over" : ""));
+        row.innerHTML =
+          '<span class="n">SET ' + (i + 1) + "</span>" +
+          '<span class="val">' + esc(setLabel(m, st.weight, st.reps)) + "</span>" +
+          '<span class="tick">✓</span>';
+        var del = el("button", "del", "×");
+        del.setAttribute("aria-label", (i + 1) + "セット目を取り消す");
+        del.addEventListener("click", function () {
+          se.sets.splice(i, 1); save("active"); render();
+        });
+        row.appendChild(del);
+        list.appendChild(row);
+      });
+      body.appendChild(list);
+    }
+
+    /* 入力 */
+    if (!done) {
+      var curW = se.sets.length ? se.sets[se.sets.length - 1].weight : suggestWeight(se.exerciseId);
+      var curR = se.sets.length ? Math.min(se.sets[se.sets.length - 1].reps, se.snapshot.repHi) : se.snapshot.repHi;
+      var e = exById(se.exerciseId);
+      var step = e ? e.step : 2.5;
+      var isTime = m === "time";
+      var noWeight = m === "time" || m === "bodyweight_reps";
+
+      var inp = el("div", "input");
+      inp.innerHTML =
+        '<div class="input-head"><span class="k">Set ' + (se.sets.length + 1) + "</span>" +
+        '<span class="target">目標 ' + repLabel(se.snapshot.repLo, se.snapshot.repHi, m) +
+        (noWeight ? "" : " ・ 刻み " + fmtW(step) + "kg") + "</span></div>" +
+        '<div class="steppers">' +
+        (noWeight ? "" :
+          '<div class="stepper"><span class="k">' + (m === "weighted_bw" ? "加重" : "重量") + "</span>" +
+          '<div class="ctrl"><button data-a="w-" aria-label="重量を下げる">−</button>' +
+          '<input type="number" inputmode="decimal" step="any" data-f="w" value="' + fmtW(curW) + '" aria-label="重量">' +
+          '<button data-a="w+" aria-label="重量を上げる">＋</button></div></div>') +
+        '<div class="stepper"><span class="k">' + (isTime ? "秒" : "回数") + "</span>" +
+        '<div class="ctrl"><button data-a="r-" aria-label="回数を減らす">−</button>' +
+        '<input type="number" inputmode="numeric" step="1" data-f="r" value="' + curR + '" aria-label="回数">' +
+        '<button data-a="r+" aria-label="回数を増やす">＋</button></div></div></div>' +
+        '<div class="guard"></div>' +
+        '<button class="log-btn" data-a="log">このセットを記録</button>';
+
+      var read = function () {
+        var wi = inp.querySelector('[data-f="w"]');
+        var ri = inp.querySelector('[data-f="r"]');
+        var w = wi ? parseFloat(wi.value) : 0;
+        var r = parseInt(ri.value, 10);
+        return { w: isNaN(w) ? 0 : w, r: isNaN(r) ? 0 : r };
+      };
+      var guard = function () {
+        var g = inp.querySelector(".guard"), b = inp.querySelector(".log-btn");
+        var v = read();
+        if (v.r > se.snapshot.repHi) {
+          g.className = "guard on";
+          g.textContent = "上限 " + se.snapshot.repHi + (isTime ? "秒" : "回") + "。ここで止めて次のセットへ";
+          b.className = "log-btn warn"; b.textContent = "上限を超えて記録する";
+        } else {
+          g.className = "guard"; g.textContent = "";
+          b.className = "log-btn"; b.textContent = "このセットを記録";
+        }
+      };
+      inp.addEventListener("input", guard);
+      inp.addEventListener("click", function (evt) {
+        var b = evt.target.closest("button[data-a]");
+        if (!b) return;
+        var a = b.getAttribute("data-a");
+        var v = read();
+        if (a === "log") {
+          se.sets.push({ weight: v.w, reps: v.r, loggedAt: new Date().toISOString() });
+          save("active");
+          startRest(se.snapshot.restSec);
+          if (seDone(se)) {
+            var nxt = firstUndone(DB.active);
+            S.openExIdx = nxt;
+          }
+          render();
+          return;
+        }
+        var wi = inp.querySelector('[data-f="w"]'), ri = inp.querySelector('[data-f="r"]');
+        if (a === "w+") wi.value = fmtW(v.w + step);
+        if (a === "w-") wi.value = fmtW(Math.max(0, v.w - step));
+        if (a === "r+") ri.value = v.r + 1;
+        if (a === "r-") ri.value = Math.max(0, v.r - 1);
+        guard();
+      });
+      body.appendChild(inp);
+      setTimeout(guard, 0);
+    }
+
+    /* 操作 */
+    var acts = el("div", "rowbtns");
+    var addSet = el("button", "ghost", "セットを追加");
+    addSet.addEventListener("click", function () {
+      se.plannedSets = se.sets.length + 1; se.skipped = false; save("active"); render();
+    });
+    var later = el("button", "ghost", "後回しにする");
+    later.addEventListener("click", function () {
+      var s2 = DB.active;
+      s2.exercises.splice(idx, 1);
+      s2.exercises.push(se);
+      S.openExIdx = -1;
+      save("active"); render();
+    });
+    acts.appendChild(addSet); acts.appendChild(later);
+    if (!done) {
+      var fin = el("button", "ghost", "この種目を終える");
+      fin.addEventListener("click", function () {
+        se.skipped = true; save("active");
+        S.openExIdx = firstUndone(DB.active); render();
+      });
+      acts.appendChild(fin);
+    }
+    body.appendChild(acts);
+
+    card.appendChild(body);
+    return card;
+  }
+
+  function finishSession() {
+    var s = DB.active;
+    if (!s) return;
+    if (!sessionSetCount(s)) {
+      if (!confirm("1セットも記録されていません。このセッションを破棄しますか？")) return;
+      DB.active = null; save("active"); stopRest(); S.stack = []; render(); return;
+    }
+    if (!confirm("トレーニングを終了して記録を保存します。よろしいですか？")) return;
+    s.endedAt = new Date().toISOString();
+    s.exercises = s.exercises.filter(function (se) { return se.sets.length > 0; });
+    DB.sessions.push(s);
+    DB.active = null;
+    save("sessions"); save("active");
+    stopRest();
+    toast("記録しました（" + fmtInt(sessionVolume(s)) + "kg）");
+    S.stack = []; S.tab = "home"; render();
+  }
+
+  /* --- レストタイマー --- */
+  var restLeft = 0, restTotal = 0, restTimer = null;
+  function paintRest() {
+    document.getElementById("restT").textContent = mmss(Math.max(0, restLeft));
+    document.getElementById("restFill").style.width =
+      (restTotal ? Math.max(0, restLeft) / restTotal * 100 : 0) + "%";
+  }
+  function startRest(sec) {
+    if (!sec) return;
+    restLeft = sec; restTotal = sec;
+    document.getElementById("rest").style.display = "flex";
+    paintRest();
+    clearInterval(restTimer);
+    restTimer = setInterval(function () {
+      restLeft--; paintRest();
+      if (restLeft <= 0) stopRest();
+    }, 1000);
+  }
+  function stopRest() {
+    clearInterval(restTimer); restLeft = 0;
+    document.getElementById("rest").style.display = "none";
+  }
+  document.getElementById("rest30").addEventListener("click", function () {
+    restLeft += 30; restTotal = Math.max(restTotal, restLeft); paintRest();
+  });
+  document.getElementById("restSkip").addEventListener("click", stopRest);
+
+  /* =========================================================
+     8. 履歴
+     ========================================================= */
+  function viewHistory() {
+    nav("履歴", { plain: true });
+    var seg = el("div", "seg");
+    ["日付順", "種目順"].forEach(function (t, i) {
+      var b = el("button", i === S.histTab ? "on" : "", t);
+      b.addEventListener("click", function () { S.histTab = i; render(); });
+      seg.appendChild(b);
+    });
+    appEl.appendChild(seg);
+
+    if (!DB.sessions.length) {
+      appEl.appendChild(el("div", "card", '<div class="empty">まだ記録がありません。</div>'));
+      return;
+    }
+    if (S.histTab === 0) histByDate(); else histByExercise();
+  }
+
+  function histByDate() {
+    var months = {}, order = [];
+    doneSessions().forEach(function (s) {
+      var k = ymLabel(s.date);
+      if (!months[k]) { months[k] = []; order.push(k); }
+      months[k].push(s);
+    });
+    order.forEach(function (k) {
+      var list = months[k];
+      var vol = list.reduce(function (a, s) { return a + sessionVolume(s); }, 0);
+      var p = group(k, list.length + "回 ・ 合計 " + fmtInt(vol) + "kg");
+      list.forEach(function (s) {
+        var prog = s.programId ? progById(s.programId) : null;
+        var hasPr = s.exercises.some(function (se) {
+          return DB.settings.mainExerciseIds.indexOf(se.exerciseId) >= 0 && isPr(se, s);
+        });
+        var b = el("button", "row dated");
+        b.innerHTML =
+          '<span class="dt">' + parseKey(s.date).getDate() + "<small>" + dow(s.date) + "</small></span>" +
+          '<span class="main"><span class="t">' + esc(prog ? prog.label : "記録") + "</span>" +
+          '<span class="s">' + s.exercises.length + "種目 ・ " + sessionSetCount(s) + "セット</span></span>" +
+          '<span class="rv"><span class="v">' + fmtInt(sessionVolume(s)) + "<small>kg</small></span>" +
+          (hasPr ? '<span class="pr">PR</span>' : "") + "</span>";
+        b.addEventListener("click", function () { push("sessionDetail", s.id); });
+        p.appendChild(b);
+      });
+    });
+  }
+
+  /* そのセッションがその種目の自己ベストか（同値は含めない） */
+  function isPr(se, s) {
+    var rm = exerciseTopRm(se, s.bodyWeightAtTime);
+    if (!rm) return false;
+    var prevBest = 0;
+    DB.sessions.forEach(function (o) {
+      if (o.date >= s.date && o.id !== s.id) return;
+      if (o.id === s.id) return;
+      o.exercises.forEach(function (ose) {
+        if (ose.exerciseId !== se.exerciseId) return;
+        prevBest = Math.max(prevBest, exerciseTopRm(ose, o.bodyWeightAtTime));
+      });
+    });
+    return rm > prevBest + 0.05;
+  }
+
+  function histByExercise() {
+    var wrap = el("div", "group");
+    var sb = el("div", "search",
+      '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+      '<input type="text" placeholder="種目を検索" value="' + esc(S.histQuery) + '">');
+    wrap.appendChild(sb);
+    appEl.appendChild(wrap);
+    var p = el("div", "panel");
+    var g = el("div", "group"); g.appendChild(p); appEl.appendChild(g);
+
+    function fill() {
+      p.innerHTML = "";
+      var seen = {}, order = [];
+      doneSessions().forEach(function (s) {
+        s.exercises.forEach(function (se) {
+          if (!se.sets.length) return;
+          if (!seen[se.exerciseId]) {
+            seen[se.exerciseId] = { name: se.snapshot.name, last: s.date, count: 0 };
+            order.push(se.exerciseId);
+          }
+          seen[se.exerciseId].count++;
+        });
+      });
+      var hit = order.filter(function (id) { return !S.histQuery || seen[id].name.indexOf(S.histQuery) >= 0; });
+      if (!hit.length) { p.appendChild(el("div", "empty", "該当する種目がありません")); return; }
+      hit.forEach(function (id) {
+        var m = seen[id], best = bestRm(id);
+        var b = el("button", "row");
+        b.innerHTML =
+          '<span class="main"><span class="t">' + esc(m.name) + "</span>" +
+          '<span class="s">' + m.count + "回実施 ・ 最終 " + md(m.last) + "</span></span>" +
+          '<span class="rv"><span class="v">' + (best ? best + "<small>kg</small>" : "—") + "</span>" +
+          '<span class="s">推定1RM</span></span>';
+        b.addEventListener("click", function () { push("exerciseHistory", id); });
+        p.appendChild(b);
+      });
+    }
+    sb.querySelector("input").addEventListener("input", function () { S.histQuery = this.value; fill(); });
+    fill();
+  }
+
+  function viewSessionDetail(id) {
+    var s = null;
+    DB.sessions.forEach(function (x) { if (x.id === id) s = x; });
+    if (!s) { pop(); return; }
+    nav(md(s.date) + "（" + dow(s.date) + "）");
+
+    var mins = s.endedAt ? Math.max(1, Math.round((new Date(s.endedAt) - new Date(s.startedAt)) / 60000)) : null;
+    var t = el("div", "tiles");
+    t.innerHTML =
+      '<div class="tile"><span class="k">総挙上量</span><span class="v">' + fmtInt(sessionVolume(s)) + "<small>kg</small></span></div>" +
+      '<div class="tile"><span class="k">セット</span><span class="v">' + sessionSetCount(s) + "<small>set</small></span></div>" +
+      '<div class="tile"><span class="k">時間</span><span class="v">' + (mins ? mins + "<small>分</small>" : "—") + "</span></div>";
+    appEl.appendChild(t);
+
+    var prog = s.programId ? progById(s.programId) : null;
+    var p = group(prog ? prog.label : "記録");
+    s.exercises.forEach(function (se) {
+      var m = se.snapshot.metric;
+      var rm = exerciseTopRm(se, s.bodyWeightAtTime);
+      var pr = isPr(se, s);
+      var best = bestRm(se.exerciseId);
+      var top = 0;
+      se.sets.forEach(function (st) { top = Math.max(top, e1rm(m, st.weight, st.reps, s.bodyWeightAtTime)); });
+      var marked = false;
+      var d = el("div", "exline");
+      var cmp = "";
+      if (rm) {
+        if (pr) cmp = '<div class="cmp">自己ベスト更新 ・ 推定1RM <b>' + rm + "kg</b></div>";
+        else {
+          var diff = Math.round((rm - best) * 10) / 10;
+          cmp = '<div class="cmp">推定1RM ' + rm + "kg ・ " +
+            (diff === 0 ? "自己ベストと同じ" : "ベストまで <b>" + Math.abs(diff) + "kg</b>") + "</div>";
+        }
+      }
+      d.innerHTML =
+        '<div class="h"><span class="n">' + esc(se.snapshot.name) + "</span>" +
+        (pr ? '<span class="pr">PR</span>' : "") + "</div>" +
+        '<div class="sets">' + se.sets.map(function (st) {
+          var isTop = !marked && e1rm(m, st.weight, st.reps, s.bodyWeightAtTime) === top && top > 0;
+          if (isTop) marked = true;
+          return '<span class="set' + (isTop ? " top" : "") + '"><b>' +
+            esc(setLabel(m, st.weight, st.reps)) + "</b></span>";
+        }).join("") + "</div>" + cmp;
+      p.appendChild(d);
+    });
+
+    var del = el("button", "danger", "このセッションを削除");
+    del.addEventListener("click", function () {
+      if (!confirm("この日の記録を削除します。取り消せません。")) return;
+      DB.sessions = DB.sessions.filter(function (x) { return x.id !== s.id; });
+      save("sessions"); pop();
+    });
+    appEl.appendChild(del);
+  }
+
+  function viewExerciseHistory(id) {
+    var recs = recordsOf(id);
+    var e = exById(id);
+    nav(e ? e.name : (recs[0] ? recs[0].se.snapshot.name : "種目"));
+    if (!recs.length) { appEl.appendChild(el("div", "card", '<div class="empty">記録がありません</div>')); return; }
+
+    var best = bestRm(id);
+    var t = el("div", "tiles");
+    t.innerHTML =
+      '<div class="tile"><span class="k">自己ベスト</span><span class="v">' + (best || "—") + "<small>kg</small></span></div>" +
+      '<div class="tile"><span class="k">実施回数</span><span class="v">' + recs.length + "<small>回</small></span></div>" +
+      '<div class="tile"><span class="k">最終</span><span class="v">' + md(recs[0].s.date) + "</span></div>";
+    appEl.appendChild(t);
+
+    var p = group("記録", "新しい順");
+    recs.forEach(function (r, i) {
+      var m = r.se.snapshot.metric;
+      var prev = recs[i + 1] ? recs[i + 1].rm : null;
+      var diff = prev !== null ? Math.round((r.rm - prev) * 10) / 10 : null;
+      var top = 0, marked = false;
+      r.se.sets.forEach(function (st) { top = Math.max(top, e1rm(m, st.weight, st.reps, r.s.bodyWeightAtTime)); });
+      var d = el("div", "exline");
+      d.innerHTML =
+        '<div class="h"><span class="n" style="font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums">' +
+        md(r.s.date) + "（" + dow(r.s.date) + "）</span>" +
+        (isPr(r.se, r.s) ? '<span class="pr">PR</span>' : "") + "</div>" +
+        '<div class="sets">' + r.se.sets.map(function (st) {
+          var isTop = !marked && e1rm(m, st.weight, st.reps, r.s.bodyWeightAtTime) === top && top > 0;
+          if (isTop) marked = true;
+          return '<span class="set' + (isTop ? " top" : "") + '"><b>' + esc(setLabel(m, st.weight, st.reps)) + "</b></span>";
+        }).join("") + "</div>" +
+        (r.rm ? '<div class="cmp' + (diff !== null && diff < 0 ? " down" : "") + '">推定1RM ' + r.rm + "kg" +
+          (diff === null ? "" : diff === 0 ? " ・ 前回と同じ" :
+            " ・ 前回比 <b>" + (diff > 0 ? "+" : "") + diff + "kg</b>") + "</div>" : "");
+      p.appendChild(d);
+    });
+  }
+
+  /* =========================================================
+     9. グラフ
+     ========================================================= */
+  var CW = 340, CH = 132, PL = 34, PR2 = 12, PT = 12, PB = 20;
+
+  function weekStart(k) {
+    var d = parseKey(k);
+    var off = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - off);
+    return dateKey(d);
+  }
+  function weekSeries(n) {
+    var weeks = [], d = new Date();
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    for (var i = n - 1; i >= 0; i--) {
+      var w = new Date(d); w.setDate(d.getDate() - i * 7);
+      weeks.push(dateKey(w));
+    }
+    return weeks;
+  }
+
+  function viewCharts() {
+    nav("グラフ", { plain: true, sub: S.chartRange === 0 ? "全期間" : "直近" + S.chartRange + "週" });
+    if (DB.sessions.length < 1) {
+      appEl.appendChild(el("div", "card", '<div class="empty">記録が溜まるとここにグラフが出ます。<br>まず1回、記録してみてください。</div>'));
+      return;
+    }
+
+    var cr = el("div", "chiprow");
+    [{ k: "8週", n: 8 }, { k: "16週", n: 16 }, { k: "全期間", n: 0 }].forEach(function (r) {
+      var b = el("button", "chip" + (S.chartRange === r.n ? " on" : ""), r.k);
+      b.addEventListener("click", function () { S.chartRange = r.n; render(); });
+      cr.appendChild(b);
+    });
+    appEl.appendChild(cr);
+
+    /* 期間の決定 */
+    var oldest = doneSessions()[DB.sessions.length - 1].date;
+    var spanWeeks = Math.max(4, Math.ceil((Date.now() - parseKey(weekStart(oldest)).getTime()) / (7 * 86400000)) + 1);
+    var n = S.chartRange === 0 ? spanWeeks : S.chartRange;
+    var weeks = weekSeries(n);
+    var labels = weeks.map(md);
+
+    var byWeek = {};
+    weeks.forEach(function (w) { byWeek[w] = { vol: 0, count: 0 }; });
+    DB.sessions.forEach(function (s) {
+      var w = weekStart(s.date);
+      if (byWeek[w]) { byWeek[w].vol += sessionVolume(s); byWeek[w].count++; }
+    });
+    var vols = weeks.map(function (w) { return byWeek[w].vol; });
+    var counts = weeks.map(function (w) { return byWeek[w].count; });
+
+    /* タイル */
+    var streak = 0;
+    for (var i = weeks.length - 1; i >= 0; i--) {
+      if (counts[i] >= DB.settings.weeklyTarget) streak++;
+      else if (i < weeks.length - 1) break;
+    }
+    var t = el("div", "tiles");
+    t.innerHTML =
+      '<div class="tile"><span class="k">連続</span><span class="v">' + streak + "<small>週</small></span></div>" +
+      '<div class="tile"><span class="k">回数</span><span class="v">' +
+      counts.reduce(function (a, b) { return a + b; }, 0) + "<small>回</small></span></div>" +
+      '<div class="tile"><span class="k">総挙上量</span><span class="v">' +
+      Math.round(vols.reduce(function (a, b) { return a + b; }, 0) / 1000) + "<small>t</small></span></div>";
+    appEl.appendChild(t);
+
+    /* 推定1RM */
+    var withData = DB.exercises.filter(function (e) { return recordsOf(e.id).length >= 1; });
+    var mains = withData.filter(function (e) { return DB.settings.mainExerciseIds.indexOf(e.id) >= 0; });
+    var pool = mains.length ? mains : withData;
+    if (pool.length) {
+      if (!S.chartLift || !pool.some(function (e) { return e.id === S.chartLift; })) S.chartLift = pool[0].id;
+      var e2 = exById(S.chartLift);
+      var recs = recordsOf(S.chartLift).slice().reverse();
+      var c = el("div", "card");
+      c.innerHTML = '<div class="card-head"><span class="card-k">推定1RM</span>' +
+        '<span class="card-note">重量 × 回数から推定</span></div>';
+      var lc = el("div", "chiprow");
+      pool.forEach(function (e3) {
+        var b = el("button", "chip" + (e3.id === S.chartLift ? " on" : ""), esc(e3.name));
+        b.addEventListener("click", function () { S.chartLift = e3.id; render(); });
+        lc.appendChild(b);
+      });
+      c.appendChild(lc);
+      if (recs.length >= 2) {
+        var vals = recs.map(function (r) { return r.rm; });
+        var d0 = Math.round((vals[vals.length - 1] - vals[0]) * 10) / 10;
+        var goal = e2.goal1RM || 0;
+        var rest2 = goal ? Math.round((goal - vals[vals.length - 1]) * 10) / 10 : null;
+        var hero = el("div", "hero");
+        hero.innerHTML = '<span class="n">' + vals[vals.length - 1] + "<small>kg</small></span>" +
+          '<span class="d">' + (d0 >= 0 ? "<b>+" + d0 + "kg</b>" : '<b class="down">' + d0 + "kg</b>") +
+          " / " + recs.length + "回" +
+          (rest2 !== null ? (rest2 > 0 ? "　目標まで残り " + rest2 + "kg" : "　目標を達成") : "") + "</span>";
+        c.appendChild(hero);
+        var cw = el("div", "chartwrap");
+        c.appendChild(cw);
+        if (goal) {
+          var lg2 = el("div", "legend", '<i><span class="key goal"></span>目標の推定1RM</i>');
+          c.appendChild(lg2);
+        }
+        appEl.appendChild(c);
+        lineChart(cw, {
+          vals: vals, labels: recs.map(function (r) { return md(r.s.date); }),
+          aria: e2.name + "の推定1RMの推移", goal: goal,
+          fmtY: function (x) { return Math.round(x); },
+          tip: function (i) { return vals[i] + "kg<span>" + md(recs[i].s.date) + "</span>"; }
+        });
+      } else {
+        c.appendChild(el("div", "empty", "2回以上記録すると推移が出ます"));
+        appEl.appendChild(c);
+      }
+    }
+
+    /* 週別 総挙上量 */
+    var vc = el("div", "card");
+    vc.innerHTML = '<div class="card-head"><span class="card-k">週ごとの総挙上量</span>' +
+      '<span class="card-note">重量 × 回数 × セット</span></div>';
+    var lastV = vols[vols.length - 1], prevV = vols[vols.length - 2] || 0;
+    var vd = lastV - prevV;
+    var vh = el("div", "hero");
+    vh.innerHTML = '<span class="n">' + fmtInt(lastV) + "<small>kg</small></span>" +
+      '<span class="d">前の週から ' + (vd >= 0 ? "<b>+" + fmtInt(vd) + "kg</b>" : '<b class="down">' + fmtInt(vd) + "kg</b>") + "</span>";
+    vc.appendChild(vh);
+    var vw = el("div", "chartwrap");
+    vc.appendChild(vw);
+    appEl.appendChild(vc);
+    barChart(vw, {
+      vals: vols, labels: labels, aria: "週ごとの総挙上量",
+      tip: function (i) { return fmtInt(vols[i]) + "kg<span>" + labels[i] + "の週</span>"; }
+    });
+
+    /* 体重 */
+    if (DB.bodyLogs.length >= 2) {
+      var wvals = DB.bodyLogs.map(function (b) { return b.weight; });
+      var wlabels = DB.bodyLogs.map(function (b) { return md(b.date); });
+      var wc2 = el("div", "card");
+      var wd = Math.round((wvals[wvals.length - 1] - wvals[0]) * 10) / 10;
+      wc2.innerHTML = '<div class="card-head"><span class="card-k">体重</span>' +
+        '<span class="card-note">記録した日のみ</span></div>' +
+        '<div class="hero"><span class="n">' + fmtW(wvals[wvals.length - 1]) + "<small>kg</small></span>" +
+        '<span class="d">' + (wd >= 0 ? "<b>+" + wd + "kg</b>" : '<b class="down">' + wd + "kg</b>") + " / 全期間</span></div>";
+      var ww = el("div", "chartwrap");
+      wc2.appendChild(ww);
+      appEl.appendChild(wc2);
+      lineChart(ww, {
+        vals: wvals, labels: wlabels, aria: "体重の推移",
+        fmtY: function (x) { return x.toFixed(1); },
+        tip: function (i) { return fmtW(wvals[i]) + "kg<span>" + wlabels[i] + "</span>"; }
+      });
+    }
+
+    /* 頻度（期間の選択とは独立に、常に直近12週） */
+    var fw = weekSeries(12);
+    var fc = fw.map(function (w) {
+      return DB.sessions.filter(function (s) { return weekStart(s.date) === w; }).length;
+    });
+    var freq = el("div", "card");
+    freq.innerHTML = '<div class="card-head"><span class="card-k">トレーニング頻度</span>' +
+      '<span class="card-note">目標 週' + DB.settings.weeklyTarget + "回</span></div>" +
+      '<div class="grid12">' + fw.map(function (w, i) {
+        return '<div class="wk"><div class="cell ' + (fc[i] >= DB.settings.weeklyTarget ? "done" : "miss") +
+          '" title="' + md(w) + "の週 " + fc[i] + '回"></div><div class="lb">' + parseKey(w).getDate() + "</div></div>";
+      }).join("") + "</div>" +
+      '<div class="legend"><i><span class="key done"></span>目標を達成</i>' +
+      '<i><span class="key miss"></span>届かなかった週</i></div>';
+    appEl.appendChild(freq);
+  }
+
+  function cscale(vals, extra) {
+    var all = extra ? vals.concat([extra]) : vals;
+    var lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+    var pad2 = (hi - lo) * 0.1 || 1;
+    lo -= pad2; hi += pad2;
+    return {
+      lo: lo, hi: hi,
+      y: function (v) { return PT + (hi - v) / (hi - lo) * (CH - PT - PB); },
+      x: function (i, n) { return PL + (n <= 1 ? (CW - PL - PR2) / 2 : i * (CW - PL - PR2) / (n - 1)); }
+    };
+  }
+  function caxis(s, labels, fmtY) {
+    var out = "";
+    [s.hi, (s.hi + s.lo) / 2, s.lo].forEach(function (v) {
+      var y = s.y(v).toFixed(1);
+      out += '<line x1="' + PL + '" y1="' + y + '" x2="' + (CW - PR2) + '" y2="' + y +
+        '" stroke="var(--line)" stroke-width="1"/>';
+    });
+    out += '<text x="' + (PL - 6) + '" y="' + (s.y(s.hi) + 3.5).toFixed(1) +
+      '" text-anchor="end" font-size="9" fill="var(--ink-3)">' + fmtY(s.hi) + "</text>";
+    out += '<text x="' + (PL - 6) + '" y="' + (s.y(s.lo) + 3.5).toFixed(1) +
+      '" text-anchor="end" font-size="9" fill="var(--ink-3)">' + fmtY(s.lo) + "</text>";
+    out += '<text x="' + PL + '" y="' + (CH - 5) + '" font-size="9" fill="var(--ink-3)">' + labels[0] + "</text>";
+    out += '<text x="' + (CW - PR2) + '" y="' + (CH - 5) +
+      '" text-anchor="end" font-size="9" fill="var(--ink-3)">' + labels[labels.length - 1] + "</text>";
+    return out;
+  }
+  function attachHover(host, n, xOf, yOf, text) {
+    var svg = host.querySelector("svg"), tip = host.querySelector(".tip");
+    var cross = svg.querySelector(".cross"), dot = svg.querySelector(".hot");
+    function at(clientX) {
+      var r = svg.getBoundingClientRect();
+      var rel = (clientX - r.left) / r.width * CW;
+      var best = 0, bd = 1e9;
+      for (var i = 0; i < n; i++) { var d = Math.abs(xOf(i) - rel); if (d < bd) { bd = d; best = i; } }
+      var x = xOf(best), y = yOf(best);
+      cross.setAttribute("x1", x); cross.setAttribute("x2", x); cross.setAttribute("opacity", "1");
+      dot.setAttribute("cx", x); dot.setAttribute("cy", y); dot.setAttribute("opacity", "1");
+      tip.innerHTML = text(best); tip.className = "tip on";
+      tip.style.left = (x / CW * 100) + "%"; tip.style.top = (y / CH * 100) + "%";
+    }
+    function off() {
+      cross.setAttribute("opacity", "0"); dot.setAttribute("opacity", "0"); tip.className = "tip";
+    }
+    svg.addEventListener("pointermove", function (e) { at(e.clientX); });
+    svg.addEventListener("pointerdown", function (e) { at(e.clientX); });
+    svg.addEventListener("pointerleave", off);
+    svg.addEventListener("pointercancel", off);
+  }
+  function lineChart(host, cfg) {
+    var vals = cfg.vals, n = vals.length, s = cscale(vals, cfg.goal);
+    var pts = vals.map(function (v, i) { return [s.x(i, n), s.y(v)]; });
+    var line = pts.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
+    var last = pts[n - 1];
+    var goalStr = "";
+    if (cfg.goal) {
+      var gy = s.y(cfg.goal).toFixed(1);
+      goalStr =
+        '<line x1="' + PL + '" y1="' + gy + '" x2="' + (CW - PR2) + '" y2="' + gy +
+        '" stroke="var(--ink-2)" stroke-width="2" stroke-dasharray="4 4" opacity=".85"/>' +
+        '<text x="' + (CW - PR2) + '" y="' + (Number(gy) - 5) +
+        '" text-anchor="end" font-size="9.5" font-weight="600" fill="var(--ink-2)">目標 ' +
+        cfg.goal + "kg</text>";
+    }
+    host.innerHTML =
+      '<svg viewBox="0 0 ' + CW + " " + CH + '" role="img" aria-label="' + esc(cfg.aria) + '">' +
+      caxis(s, cfg.labels, cfg.fmtY) + goalStr +
+      '<polyline points="' + line + '" fill="none" stroke="var(--accent)" stroke-width="2" ' +
+      'stroke-linejoin="round" stroke-linecap="round"/>' +
+      '<line class="cross" y1="' + PT + '" y2="' + (CH - PB) + '" stroke="var(--ink-3)" stroke-width="1" opacity="0"/>' +
+      '<circle cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) +
+      '" r="4" fill="var(--accent)" stroke="var(--surface-2)" stroke-width="2"/>' +
+      '<circle class="hot" r="5" fill="var(--accent)" stroke="var(--surface-2)" stroke-width="2" opacity="0"/>' +
+      "</svg>" + '<div class="tip"></div>';
+    attachHover(host, n, function (i) { return s.x(i, n); }, function (i) { return s.y(vals[i]); }, cfg.tip);
+  }
+  function barChart(host, cfg) {
+    var vals = cfg.vals, n = vals.length;
+    var hi = Math.max.apply(null, vals) * 1.1 || 1;
+    var bw = (CW - PL - PR2) / n, gap = Math.min(6, bw * 0.28);
+    function x(i) { return PL + i * bw + bw / 2; }
+    function y(v) { return PT + (1 - v / hi) * (CH - PT - PB); }
+    var bars = vals.map(function (v, i) {
+      var h = Math.max(v > 0 ? 2 : 0, (CH - PB) - y(v));
+      return '<rect x="' + (PL + i * bw + gap / 2).toFixed(1) + '" y="' + y(v).toFixed(1) +
+        '" width="' + (bw - gap).toFixed(1) + '" height="' + h.toFixed(1) +
+        '" rx="3" fill="var(--accent)" opacity="' + (i === n - 1 ? 1 : .55) + '"/>';
+    }).join("");
+    host.innerHTML =
+      '<svg viewBox="0 0 ' + CW + " " + CH + '" role="img" aria-label="' + esc(cfg.aria) + '">' +
+      '<line x1="' + PL + '" y1="' + (CH - PB) + '" x2="' + (CW - PR2) + '" y2="' + (CH - PB) +
+      '" stroke="var(--line)" stroke-width="1"/>' +
+      '<line x1="' + PL + '" y1="' + y(hi / 2).toFixed(1) + '" x2="' + (CW - PR2) + '" y2="' + y(hi / 2).toFixed(1) +
+      '" stroke="var(--line)" stroke-width="1"/>' +
+      '<text x="' + (PL - 6) + '" y="' + (y(hi / 2) + 3.5).toFixed(1) +
+      '" text-anchor="end" font-size="9" fill="var(--ink-3)">' + fmtInt(hi / 2 / 1000) + "t</text>" +
+      bars +
+      '<line class="cross" y1="' + PT + '" y2="' + (CH - PB) + '" stroke="var(--ink-3)" stroke-width="1" opacity="0"/>' +
+      '<circle class="hot" r="4" fill="var(--accent)" stroke="var(--surface-2)" stroke-width="2" opacity="0"/>' +
+      '<text x="' + PL + '" y="' + (CH - 5) + '" font-size="9" fill="var(--ink-3)">' + cfg.labels[0] + "</text>" +
+      '<text x="' + (CW - PR2) + '" y="' + (CH - 5) + '" text-anchor="end" font-size="9" fill="var(--ink-3)">' +
+      cfg.labels[n - 1] + "</text></svg>" + '<div class="tip"></div>';
+    attachHover(host, n, x, function (i) { return y(vals[i]); }, cfg.tip);
+  }
+
+  /* =========================================================
+     10. 設定
+     ========================================================= */
+  function viewSettings() {
+    nav("設定", { plain: true });
+    var p = group("プログラム");
+    DB.programs.filter(function (x) { return !x.archived; }).forEach(function (pr) {
+      rowBtn(p, esc(pr.label), pr.items.length + " 種目", "", function () { push("programEdit", pr.id); });
+    });
+
+    p = group("種目", null, "セッション画面の刻み・レスト・レップ範囲は、すべてここの設定を読みます");
+    rowBtn(p, "種目マスタ",
+      DB.exercises.filter(function (e) { return !e.archived; }).length + " 種目を登録済み",
+      "", function () { push("exerciseList", null); });
+
+    p = group("からだ");
+    stepRow(p, "週の目標回数", null, DB.settings.weeklyTarget + "回",
+      function () { DB.settings.weeklyTarget = Math.max(1, DB.settings.weeklyTarget - 1); save("settings"); render(); },
+      function () { DB.settings.weeklyTarget = Math.min(7, DB.settings.weeklyTarget + 1); save("settings"); render(); });
+    rowBtn(p, "身長", DB.settings.heightCm + "cm", "");
+
+    p = group("データ", null, "v1は端末内に保存します。同期はv2で入れます");
+    rowBtn(p, "バックアップと復元", DB.sessions.length + " 件のセッション", "", function () { push("data", null); });
+    rowBtn(p, "Googleドライブ同期", "端末を変えても記録を引き継ぐ", '<span class="badge">v2</span>', null, true);
+
+    p = group("表示");
+    var themes = [{ id: "system", label: "端末に合わせる" }, { id: "light", label: "ライト" }, { id: "dark", label: "ダーク" }];
+    chipRow(p, themes, DB.settings.theme, function (id) {
+      DB.settings.theme = id; save("settings"); applyTheme(); render();
+    });
+
+    appEl.appendChild(el("div", "hint",
+      "スキーマ v" + DB.meta.schemaVersion + " ・ 最終更新 " +
+      new Date(DB.meta.updatedAt).toLocaleString("ja-JP")));
+  }
+
+  function viewExerciseList(opt) {
+    var picking = opt && opt.pick === "session";
+    nav(picking ? "種目を選ぶ" : "種目マスタ");
+
+    var wrap = el("div", "group");
+    var sb = el("div", "search",
+      '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+      '<input type="text" placeholder="種目を検索" value="' + esc(S.settingsQuery) + '">');
+    wrap.appendChild(sb);
+    appEl.appendChild(wrap);
+
+    var cg = el("div", "group"), cp = el("div", "panel");
+    var chipList = [{ id: "すべて", label: "すべて" }].concat(PARTS);
+    chipRow(cp, chipList, S.settingsFilter, function (id) { S.settingsFilter = id; render(); });
+    cg.appendChild(cp); appEl.appendChild(cg);
+
+    var lg = el("div", "group"), lp = el("div", "panel");
+    lg.appendChild(lp); appEl.appendChild(lg);
+
+    function fill() {
+      lp.innerHTML = "";
+      var hit = DB.exercises.filter(function (e) {
+        return !e.archived &&
+          (S.settingsFilter === "すべて" || e.part === S.settingsFilter) &&
+          (!S.settingsQuery || e.name.indexOf(S.settingsQuery) >= 0);
+      });
+      if (!hit.length) { lp.appendChild(el("div", "empty", "該当する種目がありません")); return; }
+      hit.forEach(function (e) {
+        var noW = e.metric === "time" || e.metric === "bodyweight_reps";
+        rowBtn(lp, esc(e.name),
+          GEAR_LABEL[e.gear] + (noW ? "" : " ・ " + fmtW(e.step) + "kg刻み") + " ・ " + mmss(e.restSec) +
+          " ・ " + repLabel(e.repLo, e.repHi, e.metric),
+          "", function () {
+            if (picking) { addExerciseToSession(e.id); return; }
+            push("exerciseEdit", e.id);
+          });
+      });
+    }
+    sb.querySelector("input").addEventListener("input", function () { S.settingsQuery = this.value; fill(); });
+    fill();
+
+    if (!picking) {
+      var b = el("button", "primary", "＋ 新しい種目を追加");
+      b.addEventListener("click", function () {
+        var gd = gearDef("barbell");
+        S.draftExercise = {
+          id: null, name: "", part: S.settingsFilter === "すべて" ? "chest" : S.settingsFilter,
+          gear: "barbell", metric: gd.metric, step: gd.step, restSec: gd.rest,
+          repLo: 8, repHi: 12, defaultWeight: 20, autoProgress: true,
+          goal1RM: 0, videoUrl: null, isPreset: false, archived: false
+        };
+        push("exerciseNew", null);
+      });
+      appEl.appendChild(b);
+    }
+  }
+
+  function addExerciseToSession(exerciseId) {
+    var e = exById(exerciseId);
+    if (!e || !DB.active) return;
+    DB.active.exercises.push({
+      exerciseId: e.id,
+      snapshot: { name: e.name, part: e.part, metric: e.metric, repLo: e.repLo, repHi: e.repHi, restSec: e.restSec },
+      plannedSets: 3, sets: [], skipped: false
+    });
+    save("active");
+    S.openExIdx = DB.active.exercises.length - 1;
+    pop();
+  }
+
+  function exerciseEditor(e, isNew) {
+    var p = group("名前");
+    var r = el("div", "row");
+    var i = el("input");
+    i.type = "text"; i.value = e.name; i.placeholder = "例: インクラインダンベルプレス";
+    i.addEventListener("input", function () { e.name = this.value; });
+    r.appendChild(i); p.appendChild(r);
+
+    p = group("部位", null, "週セット数の集計に使います");
+    chipRow(p, PARTS, e.part, function (id) { e.part = id; render(); });
+
+    var gd = gearDef(e.gear);
+    var auto = e.step === gd.step && e.restSec === gd.rest;
+    p = group("器具", null, auto
+      ? "刻みとレストは器具から自動で入っています。個別に変えたいときだけ下を触ってください"
+      : "この種目は刻みかレストを手で変えています");
+    chipRow(p, GEARS.map(function (g) { return { id: g.id, label: g.label }; }), e.gear, function (id) {
+      var g = gearDef(id);
+      e.gear = id; e.step = g.step; e.restSec = g.rest; e.metric = g.metric;
+      render();
+    });
+
+    p = group("記録の種類", null, "入力欄と総挙上量の計算式が、ここで決まります");
+    chipRow(p, METRICS, e.metric, function (id) { e.metric = id; render(); });
+
+    var noW = e.metric === "time" || e.metric === "bodyweight_reps";
+    p = group("記録の設定 — " + (auto ? "自動" : "手動"));
+    if (!noW) {
+      stepRow(p, "重量の刻み", "±ボタンの幅 兼 重量アップの提案幅", fmtW(e.step) + "kg",
+        function () { e.step = Math.max(0.5, Math.round((e.step - 0.5) * 10) / 10); render(); },
+        function () { e.step = Math.round((e.step + 0.5) * 10) / 10; render(); });
+      stepRow(p, "初期の重量", "1回目に表示する値", fmtW(e.defaultWeight) + "kg",
+        function () { e.defaultWeight = Math.max(0, Math.round((e.defaultWeight - e.step) * 10) / 10); render(); },
+        function () { e.defaultWeight = Math.round((e.defaultWeight + e.step) * 10) / 10; render(); });
+    }
+    stepRow(p, "既定のレスト", "セット記録と同時に動き出す", mmss(e.restSec),
+      function () { e.restSec = Math.max(0, e.restSec - 15); render(); },
+      function () { e.restSec = Math.min(600, e.restSec + 15); render(); });
+    var unit = e.metric === "time" ? "秒" : "回";
+    stepRow(p, "レップ下限", "これを割ったら重量を下げる合図", e.repLo + unit,
+      function () { e.repLo = Math.max(1, e.repLo - 1); if (e.repHi < e.repLo) e.repHi = e.repLo; render(); },
+      function () { e.repLo = e.repLo + 1; if (e.repHi < e.repLo) e.repHi = e.repLo; render(); });
+    stepRow(p, "レップ上限", "超えると記録時に警告が出る", e.repHi + unit,
+      function () { e.repHi = Math.max(e.repLo, e.repHi - 1); render(); },
+      function () { e.repHi = e.repHi + 1; render(); });
+    if (!noW) {
+      switchRow(p, "重量アップを提案する", "全セットが上限に届いたら次回 +" + fmtW(e.step) + "kg",
+        e.autoProgress, function () { e.autoProgress = !e.autoProgress; render(); });
+      stepRow(p, "目標の推定1RM", "グラフに破線で引く", e.goal1RM ? fmtW(e.goal1RM) + "kg" : "なし",
+        function () { e.goal1RM = Math.max(0, Math.round((e.goal1RM - 2.5) * 10) / 10); render(); },
+        function () { e.goal1RM = Math.round((e.goal1RM + 2.5) * 10) / 10; render(); });
+    }
+
+    p = group("やり方の動画");
+    rowBtn(p, "YouTubeのURLを紐付ける", "種目名の横から1タップで開く", '<span class="badge">v2</span>', null, true);
+
+    if (!isNew) {
+      var used = DB.sessions.some(function (s) {
+        return s.exercises.some(function (se) { return se.exerciseId === e.id; });
+      });
+      var d = el("button", "danger", "この種目を隠す");
+      d.addEventListener("click", function () {
+        if (!confirm("この種目を一覧から隠します。過去の記録は残ります。")) return;
+        e.archived = true; save("exercises"); pop();
+      });
+      appEl.appendChild(d);
+      appEl.appendChild(el("div", "hint",
+        used ? "この種目には記録があります。削除ではなく非表示にすることで、過去のセッションが壊れないようにしています。"
+             : "まだ記録がない種目です。"));
+    }
+  }
+
+  function viewExerciseEdit(id) {
+    var e = exById(id);
+    if (!e) { pop(); return; }
+    nav("種目の編集", { action: "完了", onAction: function () { save("exercises"); pop(); },
+      onBack: function () { save("exercises"); pop(); } });
+    exerciseEditor(e, false);
+  }
+
+  function viewExerciseNew() {
+    var e = S.draftExercise;
+    if (!e) { pop(); return; }
+    nav("新しい種目", { action: "追加", onAction: function () {
+      if (!e.name.trim()) { toast("名前を入れてください"); return; }
+      e.id = rid("ex");
+      DB.exercises.push(e);
+      save("exercises");
+      S.draftExercise = null;
+      pop();
+      toast(e.name + " を追加しました");
+    }, onBack: function () { S.draftExercise = null; pop(); } });
+    exerciseEditor(e, true);
+    appEl.appendChild(el("div", "hint",
+      "<b>名前・部位・器具</b>の3つだけで登録できます。刻みとレストは器具から自動で入り、後からいつでも直せます。"));
+  }
+
+  function viewProgramEdit(id) {
+    var prog = progById(id);
+    if (!prog) { pop(); return; }
+    nav(prog.label, { onBack: function () { save("programs"); pop(); } });
+
+    var p = group("種目の順番とセット数", null,
+      "セッション画面はこの順番で始まります。当日その場で入れ替えることもできます");
+    prog.items.forEach(function (it, idx) {
+      var e = exById(it.exerciseId);
+      if (!e) return;
+      var d = el("div", "row prog");
+      d.innerHTML = '<span class="main"><span class="t">' + (idx + 1) + ". " + esc(e.name) + "</span>" +
+        '<span class="s">' + it.targetSets + " セット × " + repLabel(e.repLo, e.repHi, e.metric) +
+        " ・ " + mmss(e.restSec) + "</span></span>";
+      var right = el("span", "r");
+      var box = el("span", "stepbox");
+      var b1 = el("button", null, "−"); b1.setAttribute("aria-label", "セット数を減らす");
+      var v = el("span", "v", it.targetSets + "set"); v.style.minWidth = "48px";
+      var b2 = el("button", null, "＋"); b2.setAttribute("aria-label", "セット数を増やす");
+      b1.addEventListener("click", function () { it.targetSets = Math.max(1, it.targetSets - 1); save("programs"); render(); });
+      b2.addEventListener("click", function () { it.targetSets = Math.min(9, it.targetSets + 1); save("programs"); render(); });
+      box.appendChild(b1); box.appendChild(v); box.appendChild(b2);
+      var ord = el("span", "ord");
+      var up = el("button", null, "↑"); up.setAttribute("aria-label", "上へ");
+      var dn = el("button", null, "↓"); dn.setAttribute("aria-label", "下へ");
+      var rm = el("button", null, "×"); rm.setAttribute("aria-label", "この種目を外す");
+      if (idx === 0) up.disabled = true;
+      if (idx === prog.items.length - 1) dn.disabled = true;
+      up.addEventListener("click", function () { prog.items.splice(idx - 1, 0, prog.items.splice(idx, 1)[0]); save("programs"); render(); });
+      dn.addEventListener("click", function () { prog.items.splice(idx + 1, 0, prog.items.splice(idx, 1)[0]); save("programs"); render(); });
+      rm.addEventListener("click", function () { prog.items.splice(idx, 1); save("programs"); render(); });
+      ord.appendChild(up); ord.appendChild(dn); ord.appendChild(rm);
+      right.appendChild(box); right.appendChild(ord);
+      d.appendChild(right);
+      p.appendChild(d);
+    });
+
+    var counts = {};
+    prog.items.forEach(function (it) {
+      var e = exById(it.exerciseId);
+      if (!e) return;
+      counts[e.part] = (counts[e.part] || 0) + it.targetSets;
+    });
+    var line = Object.keys(counts).map(function (k) { return PART_LABEL[k] + " " + counts[k]; }).join(" ・ ");
+    var g2 = group("この日の部位別セット数");
+    g2.appendChild(el("div", "row",
+      '<span class="main"><span class="t" style="font-variant-numeric:tabular-nums">' + line +
+      '</span><span class="s">筋肥大の目安は週10〜16セット</span></span>'));
+
+    var add = el("button", "primary", "＋ この日に種目を追加");
+    add.addEventListener("click", function () { push("exerciseList", { pick: "program", programId: prog.id }); });
+    appEl.appendChild(add);
+
+    /* 種目選択から戻ってきたとき用 */
+    S.programPick = prog.id;
+  }
+
+  function viewData() {
+    nav("バックアップと復元");
+    var json = JSON.stringify(exportAll(), null, 2);
+
+    var p = group("書き出し", null, "このJSONを保存しておけば、端末を変えても復元できます");
+    var ta = el("textarea", "json");
+    ta.value = json; ta.readOnly = true;
+    var w = el("div", "row"); w.style.display = "block"; w.appendChild(ta);
+    p.appendChild(w);
+
+    var btns = el("div", "rowbtns");
+    var copy = el("button", "ghost", "コピー");
+    copy.addEventListener("click", function () {
+      ta.select();
+      try { document.execCommand("copy"); toast("コピーしました"); }
+      catch (e) { toast("コピーできませんでした"); }
+    });
+    var dl = el("button", "ghost", "ファイルに保存");
+    dl.addEventListener("click", function () {
+      try {
+        var blob = new Blob([json], { type: "application/json" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "workout-log-" + dateKey(new Date()) + ".json";
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+      } catch (e) { toast("この環境では保存できません。コピーを使ってください"); }
+    });
+    btns.appendChild(copy); btns.appendChild(dl);
+    appEl.appendChild(btns);
+
+    var p2 = group("読み込み", null, "書き出したJSONを貼り付けて取り込みます。今のデータは上書きされます");
+    var ta2 = el("textarea", "json");
+    ta2.placeholder = "ここにJSONを貼り付ける";
+    var w2 = el("div", "row"); w2.style.display = "block"; w2.appendChild(ta2);
+    p2.appendChild(w2);
+    var imp = el("button", "primary", "取り込む");
+    imp.addEventListener("click", function () { importAll(ta2.value); });
+    appEl.appendChild(imp);
+
+    var p3 = group("その他");
+    var demo = el("button", "ghost", "サンプルデータを入れる");
+    demo.style.flex = "none";
+    demo.addEventListener("click", seedDemo);
+    appEl.appendChild(demo);
+    var reset = el("button", "danger", "すべて消して初期状態に戻す");
+    reset.addEventListener("click", function () {
+      if (!confirm("すべての記録を削除します。取り消せません。")) return;
+      Object.keys(K).forEach(function (k) { localStorage.removeItem(K[k]); });
+      load(); S.stack = []; S.tab = "home"; render();
+      toast("初期状態に戻しました");
+    });
+    appEl.appendChild(reset);
+  }
+
+  function exportAll() {
+    return {
+      app: "workout-log", schemaVersion: DB.meta.schemaVersion,
+      exportedAt: new Date().toISOString(),
+      meta: DB.meta, settings: DB.settings, exercises: DB.exercises,
+      programs: DB.programs, sessions: DB.sessions, bodyLogs: DB.bodyLogs
+    };
+  }
+  function importAll(text) {
+    var d;
+    try { d = JSON.parse(text); } catch (e) { toast("JSONとして読めませんでした"); return; }
+    if (d.app !== "workout-log") { toast("このアプリのバックアップではありません"); return; }
+    if (d.schemaVersion > SCHEMA) { toast("新しいバージョンのデータです。アプリを更新してください"); return; }
+    if (!confirm("今のデータを上書きします。よろしいですか？")) return;
+    DB.settings = Object.assign(clone(DEFAULT_SETTINGS), d.settings || {});
+    DB.exercises = d.exercises || clone(PRESET_EXERCISES);
+    DB.programs = d.programs || clone(PRESET_PROGRAMS);
+    DB.sessions = d.sessions || [];
+    DB.bodyLogs = d.bodyLogs || [];
+    DB.active = null;
+    ["settings", "exercises", "programs", "sessions", "bodyLogs", "active"].forEach(save);
+    S.stack = []; S.tab = "home"; render();
+    toast("取り込みました");
+  }
+
+  /* --- サンプルデータ --- */
+  function seedDemo() {
+    if (DB.sessions.length && !confirm("既存の記録にサンプルを追加します。よろしいですか？")) return;
+    var bw = 58.0;
+    for (var k = 11; k >= 0; k--) {
+      var prog = progById(k % 2 === 1 ? "prog_a" : "prog_b");
+      var idx = Math.floor((11 - k) / 2);
+      var d = new Date(); d.setDate(d.getDate() - Math.round(k * 3.5));
+      var stall = [0, 1, 1, 2, 3, 3];
+      var s = {
+        id: rid("ses"), programId: prog.id, date: dateKey(d),
+        startedAt: new Date(d.getTime() + 19 * 3600000).toISOString(),
+        endedAt: new Date(d.getTime() + 19 * 3600000 + 82 * 60000).toISOString(),
+        bodyWeightAtTime: Math.round((bw + idx * 0.2) * 10) / 10, note: "",
+        exercises: prog.items.map(function (it, pos) {
+          var e = exById(it.exerciseId);
+          var mult = stall[Math.min(5, idx + (pos % 2))];
+          var base = e.defaultWeight * 0.85 + e.step * 2 * mult;
+          var w = e.metric === "time" || e.metric === "bodyweight_reps" ? 0
+            : Math.max(e.step, Math.round(base / (e.step || 1)) * (e.step || 1));
+          var sets = [];
+          for (var i = 0; i < it.targetSets; i++) {
+            var r = e.repHi - (i >= 2 ? 1 : 0) - (i >= 3 ? 1 : 0);
+            sets.push({ weight: w, reps: Math.max(e.repLo, r), loggedAt: new Date(d).toISOString() });
+          }
+          return {
+            exerciseId: e.id,
+            snapshot: { name: e.name, part: e.part, metric: e.metric, repLo: e.repLo, repHi: e.repHi, restSec: e.restSec },
+            plannedSets: it.targetSets, sets: sets, skipped: false
+          };
+        })
+      };
+      DB.sessions.push(s);
+    }
+    for (var j = 7; j >= 0; j--) {
+      var wd = new Date(); wd.setDate(wd.getDate() - j * 7);
+      DB.bodyLogs.push({ date: dateKey(wd), weight: Math.round((58.0 + (7 - j) * 0.15) * 10) / 10 });
+    }
+    save("sessions"); save("bodyLogs");
+    S.stack = []; render();
+    toast("サンプルデータを入れました");
+  }
+
+  /* =========================================================
+     11. 起動
+     ========================================================= */
+  function applyTheme() {
+    var t = DB.settings.theme;
+    if (t === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", t);
+  }
+
+  /* 種目選択から戻ったときにプログラムへ追加する */
+  function handleProgramPick(exerciseId) {
+    var prog = progById(S.programPick);
+    if (!prog) return false;
+    prog.items.push({ exerciseId: exerciseId, targetSets: 3 });
+    save("programs");
+    return true;
+  }
+  /* exerciseList からの選択を用途で振り分ける */
+  var _viewExerciseList = viewExerciseList;
+  viewExerciseList = function (opt) {
+    if (opt && opt.pick === "program") {
+      nav("種目を追加");
+      var lp = group("種目マスタ");
+      DB.exercises.filter(function (e) { return !e.archived; }).forEach(function (e) {
+        rowBtn(lp, esc(e.name), PART_LABEL[e.part] + " ・ " + GEAR_LABEL[e.gear], "", function () {
+          handleProgramPick(e.id);
+          pop();
+        });
+      });
+      return;
+    }
+    _viewExerciseList(opt);
+  };
+
+  load();
+  applyTheme();
+  render();
+
+  /* 経過時間の更新 */
+  setInterval(function () {
+    if (here().name === "home" && DB.active) {
+      var m = appEl.querySelector(".next-meta b");
+      if (m) m.textContent = elapsed(DB.active.startedAt);
+    }
+  }, 1000);
+
+  window.addEventListener("beforeunload", function () {
+    if (DB.active) save("active");
+  });
+})();
+</script>
