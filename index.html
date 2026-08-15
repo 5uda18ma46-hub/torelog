@@ -49,6 +49,10 @@
 
   * { box-sizing: border-box; }
   html, body { height: 100%; }
+  /* ±を連打したときにダブルタップと解釈されて画面が拡大するのを止める。
+     ピンチでの拡大は残す（manipulation はダブルタップだけを無効にする）。 */
+  html, body, button, input, label, .row, .chip, .tab { touch-action: manipulation; }
+  button { -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
   body {
     margin: 0; background: var(--ground); color: var(--ink);
     font-family: var(--font-ui); font-size: 15px; line-height: 1.6;
@@ -220,8 +224,9 @@
 
   .search { display: flex; align-items: center; gap: 8px; background: var(--surface-2);
     border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px; }
+  /* iOSは16px未満の入力欄にフォーカスすると勝手に拡大するので、下回らせない */
   .search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink);
-    font-family: var(--font-ui); font-size: 14.5px; }
+    font-family: var(--font-ui); font-size: 16px; }
   .search input:focus { outline: none; }
   .search svg { width: 16px; height: 16px; stroke: var(--ink-3); fill: none; stroke-width: 2; }
 
@@ -445,7 +450,7 @@
   .field input[type="date"], .field input[type="number"] {
     flex: 1; min-width: 0; text-align: right;
     border: 1px solid var(--line); background: var(--surface); color: var(--ink);
-    font-family: var(--font-ui); font-size: 15px; font-weight: 600;
+    font-family: var(--font-ui); font-size: 16px; font-weight: 600;
     font-variant-numeric: tabular-nums; border-radius: 9px; padding: 8px 10px;
   }
   .field input:focus { outline: none; border-color: var(--accent); }
@@ -811,6 +816,22 @@
     if (html !== undefined) n.innerHTML = html;
     return n;
   }
+  /* ±ボタンの長押しで連続増減。何度もタップさせないため。
+     最初の1回はclickが担当し、こちらは400ms押し続けたあとの繰り返しだけを受け持つ */
+  function holdRepeat(btn, step) {
+    var delay = null, timer = null;
+    function stop() { clearTimeout(delay); clearInterval(timer); delay = timer = null; }
+    btn.addEventListener("pointerdown", function () {
+      stop();
+      delay = setTimeout(function () {
+        timer = setInterval(step, 120);
+      }, 450);
+    });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(function (ev) {
+      btn.addEventListener(ev, stop);
+    });
+  }
+
   var toastTimer = null;
   function toast(msg) {
     var t = document.getElementById("toast");
@@ -1101,8 +1122,17 @@
     var btns = el("div", "w-btns");
     var minus = el("button", null, "−"); minus.setAttribute("aria-label", "体重を減らす");
     var plus = el("button", null, "＋"); plus.setAttribute("aria-label", "体重を増やす");
-    minus.addEventListener("click", function () { S.weightDraft = Math.round((bw - 0.1) * 10) / 10; render(); });
-    plus.addEventListener("click", function () { S.weightDraft = Math.round((bw + 0.1) * 10) / 10; render(); });
+    var valEl = wc.querySelector(".w-val");
+    /* 再描画せずその場で書き換える。再描画するとボタンが作り直されて長押しが切れるため */
+    function bumpW(d) {
+      S.weightDraft = Math.round((S.weightDraft === null ? bw : S.weightDraft) * 10 + d * 10) / 10;
+      if (S.weightDraft < 0) S.weightDraft = 0;
+      valEl.innerHTML = fmtW(S.weightDraft) + "<small>kg</small>";
+    }
+    minus.addEventListener("click", function () { bumpW(-0.1); });
+    plus.addEventListener("click", function () { bumpW(0.1); });
+    holdRepeat(minus, function () { bumpW(-0.1); });
+    holdRepeat(plus, function () { bumpW(0.1); });
     btns.appendChild(minus); btns.appendChild(plus);
     wr.appendChild(btns);
 
@@ -1114,14 +1144,15 @@
     }
     var wsave = el("button", "w-save", "今日の体重を記録");
     wsave.addEventListener("click", function () {
+      var w = S.weightDraft === null ? bw : S.weightDraft;
       var k = dateKey(new Date());
       var found = false;
-      DB.bodyLogs.forEach(function (b) { if (b.date === k) { b.weight = bw; found = true; } });
-      if (!found) DB.bodyLogs.push({ date: k, weight: bw });
+      DB.bodyLogs.forEach(function (b) { if (b.date === k) { b.weight = w; found = true; } });
+      if (!found) DB.bodyLogs.push({ date: k, weight: w });
       DB.bodyLogs.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
       save("bodyLogs");
       S.weightDraft = null;
-      toast(fmtW(bw) + "kg を記録しました");
+      toast(fmtW(w) + "kg を記録しました");
       render();
     });
     wc.appendChild(wsave);
@@ -1478,6 +1509,21 @@
           b.className = "log-btn"; b.textContent = "このセットを記録";
         }
       };
+      var bump = function (a) {
+        var v = read();
+        var wi = inp.querySelector('[data-f="w"]'), ri = inp.querySelector('[data-f="r"]');
+        if (a === "w+") wi.value = fmtW(v.w + step);
+        if (a === "w-") wi.value = fmtW(Math.max(0, v.w - step));
+        if (a === "r+") ri.value = v.r + 1;
+        if (a === "r-") ri.value = Math.max(0, v.r - 1);
+        guard();
+      };
+      inp.querySelectorAll("button[data-a]").forEach(function (b) {
+        var a = b.getAttribute("data-a");
+        if (a === "log") return;
+        holdRepeat(b, function () { bump(a); });
+      });
+
       inp.addEventListener("input", guard);
       inp.addEventListener("click", function (evt) {
         var b = evt.target.closest("button[data-a]");
@@ -1495,12 +1541,7 @@
           render();
           return;
         }
-        var wi = inp.querySelector('[data-f="w"]'), ri = inp.querySelector('[data-f="r"]');
-        if (a === "w+") wi.value = fmtW(v.w + step);
-        if (a === "w-") wi.value = fmtW(Math.max(0, v.w - step));
-        if (a === "r+") ri.value = v.r + 1;
-        if (a === "r-") ri.value = Math.max(0, v.r - 1);
-        guard();
+        bump(a);
       });
       body.appendChild(inp);
       setTimeout(guard, 0);
