@@ -533,7 +533,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-08-16 #2";
+  var APP_VERSION = "2026-08-16 #3";
   var K = {
     meta: "wl:meta", settings: "wl:settings", exercises: "wl:exercises",
     programs: "wl:programs", sessions: "wl:sessions", active: "wl:active", bodyLogs: "wl:bodyLogs"
@@ -2952,10 +2952,39 @@
       });
   }
 
-  function driveUpload() {
+  /* ドライブ側の記録件数を先に見る。
+     記録の少ない端末から上書きして、多いほうを消す事故を防ぐ（実際に一度起きた） */
+  function driveRemoteSummary() {
+    return driveFindFile().then(function (f) {
+      if (!f) return null;
+      return driveFetch("https://www.googleapis.com/drive/v3/files/" + f.id + "?alt=media")
+        .then(function (r) { return r.text(); })
+        .then(function (t) {
+          var j;
+          try { j = JSON.parse(t); } catch (e) { return null; }
+          return {
+            file: f,
+            sessions: (j.sessions || []).length,
+            bodyLogs: (j.bodyLogs || []).length,
+            updatedAt: (j.meta && j.meta.updatedAt) || null
+          };
+        })
+        .catch(function () { return null; });
+    });
+  }
+
+  function driveUpload(force) {
     var d = driveCfg();
     var body = JSON.stringify(exportAll());
-    return driveFindFile().then(function (f) {
+    var guard = force ? Promise.resolve(null) : driveRemoteSummary().then(function (r) {
+      if (r && r.sessions > DB.sessions.length) {
+        var err = new Error("remote-has-more");
+        err.remote = r.sessions; err.local = DB.sessions.length;
+        throw err;
+      }
+      return null;
+    });
+    return guard.then(function () { return driveFindFile(); }).then(function (f) {
       if (f) {
         return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + f.id + "?uploadType=media", {
           method: "PATCH",
@@ -3000,6 +3029,7 @@
     if (m === "popup-closed") return "Googleの画面が閉じられました";
     if (m === "auth-failed") return "認証できませんでした。テストユーザーの設定を確認してください";
     if (m === "not-found") return "ドライブにバックアップがまだありません";
+    if (m === "remote-has-more") return "ドライブの記録のほうが多いため中止しました";
     if (m === "gis") return "Googleに接続できません（オフラインの可能性）";
     if (m === "unauthorized") return "権限が切れました。もう一度接続してください";
     if (m && m.indexOf("http-") === 0) {
@@ -3021,9 +3051,16 @@
   function driveAutoUpload() {
     var d = driveCfg();
     if (!d.auto || !d.clientId) return;
-    driveAuth(false).then(driveUpload).then(function () {
+    driveAuth(false).then(function () { return driveUpload(false); }).then(function () {
       toast("ドライブに同期しました");
-    }).catch(function () { /* 静かに失敗させる。記録自体は端末に残っている */ });
+    }).catch(function (e) {
+      if (e && e.message === "remote-has-more") {
+        /* 勝手に上書きしない。手動で判断してもらう */
+        toast("ドライブの記録のほうが多いため同期を見送りました");
+        return;
+      }
+      /* それ以外は静かに失敗させる。記録自体は端末に残っている */
+    });
   }
 
   function viewSync() {
@@ -3065,14 +3102,26 @@
       var up = el("button", "primary", "この端末の記録をドライブへ保存");
       up.addEventListener("click", function () {
         up.disabled = true; up.textContent = "同期中…";
-        driveAuth(true).then(driveUpload).then(function () {
-          toast("ドライブに保存しました");
-          render();
-        }).catch(function (e) {
-          var msg = driveError(e);
+        var reset = function () {
           up.disabled = false; up.textContent = "この端末の記録をドライブへ保存";
-          toast(msg);
-          render();
+        };
+        driveAuth(true).then(function () { return driveUpload(false); }).then(function () {
+          toast("ドライブに保存しました"); render();
+        }).catch(function (e) {
+          if (e && e.message === "remote-has-more") {
+            reset();
+            if (confirm("ドライブには " + e.remote + " 件、この端末には " + e.local +
+              " 件の記録があります。\nこのまま保存すると、ドライブ側の " +
+              (e.remote - e.local) + " 件が消えます。\n\n本当に上書きしますか？")) {
+              up.disabled = true; up.textContent = "同期中…";
+              driveUpload(true).then(function () {
+                toast("ドライブに保存しました"); render();
+              }).catch(function (e2) { toast(driveError(e2)); reset(); render(); });
+            }
+            return;
+          }
+          var msg = driveError(e);
+          reset(); toast(msg); render();
         });
       });
       appEl.appendChild(up);
