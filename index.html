@@ -2664,9 +2664,24 @@
     opts = opts || {};
     opts.headers = Object.assign({ Authorization: "Bearer " + DRIVE.token.value }, opts.headers || {});
     return fetch(url, opts).then(function (r) {
+      if (r.ok) return r;
       if (r.status === 401) { DRIVE.token = null; throw new Error("unauthorized"); }
-      if (!r.ok) throw new Error("http-" + r.status);
-      return r;
+      /* Google が返している理由をそのまま拾う。
+         ステータスコードだけだと原因の切り分けができないため */
+      return r.text().then(function (t) {
+        var msg = "", reason = "";
+        try {
+          var j = JSON.parse(t);
+          if (j.error) {
+            msg = j.error.message || "";
+            reason = (j.error.errors && j.error.errors[0] && j.error.errors[0].reason) || j.error.status || "";
+          }
+        } catch (e) { msg = (t || "").slice(0, 200); }
+        var err = new Error("http-" + r.status);
+        err.detail = msg;
+        err.reason = reason;
+        throw err;
+      });
     });
   }
 
@@ -2727,13 +2742,25 @@
 
   function driveError(e) {
     var m = e && e.message;
+    DRIVE.lastError = null;
     if (m === "no-client-id") return "クライアントIDを先に設定してください";
     if (m === "popup-closed") return "Googleの画面が閉じられました";
     if (m === "auth-failed") return "認証できませんでした。テストユーザーの設定を確認してください";
     if (m === "not-found") return "ドライブにバックアップがまだありません";
     if (m === "gis") return "Googleに接続できません（オフラインの可能性）";
     if (m === "unauthorized") return "権限が切れました。もう一度接続してください";
-    if (m && m.indexOf("http-") === 0) return "ドライブでエラーが起きました（" + m.slice(5) + "）";
+    if (m && m.indexOf("http-") === 0) {
+      /* Google の生メッセージは長いので、画面側に出す */
+      DRIVE.lastError = { code: m.slice(5), reason: e.reason || "", detail: e.detail || "" };
+      if (e.reason === "accessNotConfigured" || (e.detail || "").indexOf("has not been used in project") >= 0) {
+        return "Google Drive API が有効になっていません";
+      }
+      if (e.reason === "insufficientPermissions") return "権限が足りません。接続をやり直してください";
+      if (e.reason === "rateLimitExceeded" || e.reason === "userRateLimitExceeded") {
+        return "アクセスが多すぎます。少し待って再実行してください";
+      }
+      return "ドライブでエラーが起きました（" + m.slice(5) + "）";
+    }
     return "同期に失敗しました";
   }
 
@@ -2749,6 +2776,21 @@
   function viewSync() {
     nav("Googleドライブ同期");
     var d = driveCfg();
+
+    /* 直前の失敗を、Google が返した文面のまま出す。
+       ステータスコードだけでは原因を切り分けられないため */
+    if (DRIVE.lastError) {
+      var er = el("div", "card");
+      er.style.background = "var(--warn-soft)";
+      er.style.borderColor = "transparent";
+      er.innerHTML =
+        '<div class="card-head"><span class="card-k" style="color:var(--warn)">直前のエラー ' +
+        esc(DRIVE.lastError.code) + (DRIVE.lastError.reason ? " / " + esc(DRIVE.lastError.reason) : "") +
+        "</span></div>" +
+        '<div style="font-size:12.5px;color:var(--warn);line-height:1.6;word-break:break-word">' +
+        esc(DRIVE.lastError.detail || "詳細なし") + "</div>";
+      appEl.appendChild(er);
+    }
 
     if (!d.clientId) {
       appEl.appendChild(el("div", "card",
@@ -2774,7 +2816,10 @@
           toast("ドライブに保存しました");
           render();
         }).catch(function (e) {
-          toast(driveError(e)); up.disabled = false; up.textContent = "この端末の記録をドライブへ保存";
+          var msg = driveError(e);
+          up.disabled = false; up.textContent = "この端末の記録をドライブへ保存";
+          toast(msg);
+          render();
         });
       });
       appEl.appendChild(up);
@@ -2793,7 +2838,7 @@
           var fresh = driveCfg();
           fresh.lastSyncAt = new Date().toISOString();
           save("settings");
-        }).catch(function (e) { toast(driveError(e)); });
+        }).catch(function (e) { var msg = driveError(e); toast(msg); render(); });
       });
       appEl.appendChild(down);
 
