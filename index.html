@@ -165,6 +165,10 @@
   .row.dated { grid-template-columns: 44px 1fr auto; }
   .row.exrow { grid-template-columns: 1fr 64px auto 12px; gap: 9px; }
   .minispark { width: 64px; height: 24px; display: block; }
+  .row.partrow .t { font-size: 15.5px; font-weight: 650; }
+  .row.partrow .chev { transition: transform .16s ease; display: inline-block; }
+  .row.partrow.open { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+  .row.partrow.open .chev { transform: rotate(90deg); }
   .row .dt { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
   .row .dt small { display: block; font-size: 10px; font-weight: 550; color: var(--ink-3); }
   .chev { color: var(--ink-3); font-size: 15px; }
@@ -885,6 +889,7 @@
     stack: [],            // {name, arg}
     openExIdx: 0,
     weightDraft: null,
+    openParts: {},
     settingsFilter: "すべて",
     settingsQuery: "",
     histTab: 0,
@@ -1962,39 +1967,6 @@
       Math.round(vols.reduce(function (a, b) { return a + b; }, 0) / 1000) + "<small>t</small></span></div>";
     appEl.appendChild(t);
 
-    /* 種目別の伸び
-       チップの横スクロールで探させると、種目が増えるほど手間になる。
-       縦のリストにして、各行に推移線と現在値を出す。探す手間がなくなるだけでなく
-       「どれが伸びていて、どれが止まっているか」が一覧で分かる。
-       推定1RMが出せない種目（時間・自重のみ）は外す。 */
-    var pool = chartableExercises().map(function (e) {
-      var recs = recordsOf(e.id).slice().reverse(); // 古い順
-      return { e: e, recs: recs, last: recs[recs.length - 1] };
-    }).sort(function (a, b) {
-      return a.last.s.date < b.last.s.date ? 1 : a.last.s.date > b.last.s.date ? -1 : 0;
-    });
-
-    if (pool.length) {
-      var lc = group("種目別の伸び", "最近やった順");
-      pool.forEach(function (x) {
-        var vals = x.recs.map(function (r) { return r.rm; });
-        var now = vals[vals.length - 1];
-        var diff = vals.length >= 2 ? Math.round((now - vals[vals.length - 2]) * 10) / 10 : null;
-        var b = el("button", "row exrow");
-        b.innerHTML =
-          '<span class="main"><span class="t">' + esc(x.e.name) + '</span>' +
-          '<span class="s">' + PART_LABEL[x.e.part] + ' ・ ' + GEAR_LABEL[x.e.gear] + '</span></span>' +
-          '<svg class="minispark" viewBox="0 0 64 24" preserveAspectRatio="none" aria-hidden="true"></svg>' +
-          '<span class="rv"><span class="v">' + now + '<small>kg</small></span>' +
-          '<span class="s">' + (diff === null ? "初回" : diff === 0 ? "前回と同じ"
-            : (diff > 0 ? "+" : "") + diff + "kg") + '</span></span>' +
-          '<span class="chev">›</span>';
-        miniSpark(b.querySelector("svg"), vals);
-        b.addEventListener("click", function () { push("exerciseHistory", x.e.id); });
-        lc.appendChild(b);
-      });
-    }
-
     /* 週別 総挙上量 */
     var vc = el("div", "card");
     vc.innerHTML = '<div class="card-head"><span class="card-k">週ごとの総挙上量</span>' +
@@ -2051,6 +2023,67 @@
       '<div class="legend"><i><span class="key done"></span>目標を達成</i>' +
       '<i><span class="key miss"></span>届かなかった週</i></div>';
     appEl.appendChild(freq);
+
+    /* 種目別の伸び（部位ごとに畳む）
+       全種目を常に並べると縦に長くなるので、普段は部位単位で閉じておき、
+       見たい部位をタップしたときだけ展開する。 */
+    var pool = chartableExercises().map(function (e) {
+      var recs = recordsOf(e.id).slice().reverse(); // 古い順
+      return { e: e, recs: recs, last: recs[recs.length - 1] };
+    });
+
+    if (pool.length) {
+      appEl.appendChild(el("div", "gk", "種目別の伸び<span>部位をタップして開く</span>"));
+      PARTS.forEach(function (part) {
+        var items = pool.filter(function (x) { return x.e.part === part.id; })
+          .sort(function (a, b) {
+            return a.last.s.date < b.last.s.date ? 1 : a.last.s.date > b.last.s.date ? -1 : 0;
+          });
+        if (!items.length) return;
+
+        var open = !!S.openParts[part.id];
+        var panel = el("div", "panel");
+
+        var latest = items.reduce(function (a, x) {
+          return !a || x.last.s.date > a ? x.last.s.date : a;
+        }, null);
+        var head = el("button", "row partrow" + (open ? " open" : ""));
+        head.setAttribute("aria-expanded", open ? "true" : "false");
+        head.innerHTML =
+          '<span class="main"><span class="t">' + part.label + '</span>' +
+          '<span class="s">' + items.length + '種目 ・ 最終 ' + md(latest) + '</span></span>' +
+          '<span class="chev">›</span>';
+        head.addEventListener("click", function () {
+          S.openParts[part.id] = !S.openParts[part.id];
+          render();
+        });
+        panel.appendChild(head);
+
+        if (open) {
+          items.forEach(function (x) {
+            var vals = x.recs.map(function (r) { return r.rm; });
+            var now = vals[vals.length - 1];
+            var diff = vals.length >= 2 ? Math.round((now - vals[vals.length - 2]) * 10) / 10 : null;
+            var b = el("button", "row exrow");
+            b.innerHTML =
+              '<span class="main"><span class="t">' + esc(x.e.name) + '</span>' +
+              '<span class="s">' + GEAR_LABEL[x.e.gear] + ' ・ 最終 ' + md(x.last.s.date) + '</span></span>' +
+              '<svg class="minispark" viewBox="0 0 64 24" preserveAspectRatio="none" aria-hidden="true"></svg>' +
+              '<span class="rv"><span class="v">' + now + '<small>kg</small></span>' +
+              '<span class="s">' + (diff === null ? "初回" : diff === 0 ? "前回と同じ"
+                : (diff > 0 ? "+" : "") + diff + "kg") + '</span></span>' +
+              '<span class="chev">›</span>';
+            miniSpark(b.querySelector("svg"), vals);
+            b.addEventListener("click", function () { push("exerciseHistory", x.e.id); });
+            panel.appendChild(b);
+          });
+        }
+
+        var g = el("div", "group");
+        g.appendChild(panel);
+        appEl.appendChild(g);
+      });
+    }
   }
 
   function cscale(vals, extra) {
