@@ -165,6 +165,22 @@
   .row.dated { grid-template-columns: 44px 1fr auto; }
   .row.exrow { grid-template-columns: 1fr 64px auto 12px; gap: 9px; }
   .minispark { width: 64px; height: 24px; display: block; }
+  .videowrap { display: flex; flex-direction: column; gap: 6px; }
+  .videobox {
+    width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden;
+    background: #000; border: 1px solid var(--line);
+  }
+  .videobox.vertical { aspect-ratio: 9 / 16; height: min(52vh, 420px); width: auto; margin: 0 auto; }
+  .videobox iframe { width: 100%; height: 100%; border: 0; display: block; }
+  .videobtn {
+    display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+    border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2);
+    border-radius: 999px; padding: 6px 12px; font-family: var(--font-ui);
+    font-size: 12.5px; font-weight: 600; cursor: pointer;
+  }
+  .videobtn:hover { color: var(--ink); }
+  .videobtn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
   .row.partrow .t { font-size: 15.5px; font-weight: 650; }
   .row.partrow .chev { transition: transform .16s ease; display: inline-block; }
   .row.partrow.open { background: color-mix(in srgb, var(--ink) 4%, transparent); }
@@ -842,6 +858,49 @@
     if (html !== undefined) n.innerHTML = html;
     return n;
   }
+  /* --- YouTube ---
+     watch / youtu.be / shorts のどれでも受け取り、動画IDだけを取り出す。
+     ショートは縦長なので、表示サイズを変えるために判定も返す。 */
+  function parseYouTube(url) {
+    if (!url) return null;
+    var u = String(url).trim();
+    var id = null, vertical = false;
+    var m;
+    if ((m = u.match(/[?&]v=([A-Za-z0-9_-]{11})/))) id = m[1];
+    else if ((m = u.match(/youtu\.be\/([A-Za-z0-9_-]{11})/))) id = m[1];
+    else if ((m = u.match(/\/shorts\/([A-Za-z0-9_-]{11})/))) { id = m[1]; vertical = true; }
+    else if ((m = u.match(/\/embed\/([A-Za-z0-9_-]{11})/))) id = m[1];
+    else if (/^[A-Za-z0-9_-]{11}$/.test(u)) id = u;
+    if (!id) return null;
+    if (/\/shorts\//.test(u)) vertical = true;
+    return { id: id, vertical: vertical };
+  }
+  function youtubeEmbed(v) {
+    /* nocookie ドメインを使う。再生するまでクッキーを置かれない */
+    return "https://www.youtube-nocookie.com/embed/" + v.id + "?playsinline=1&rel=0&modestbranding=1";
+  }
+  function youtubeSearchUrl(name) {
+    return "https://www.youtube.com/results?search_query=" +
+      encodeURIComponent(name + " やり方 フォーム");
+  }
+  /* 押されたときに初めて iframe を作る。普段はネットワークを一切使わない */
+  function videoBox(exercise) {
+    var v = parseYouTube(exercise.videoUrl);
+    if (!v) return null;
+    var wrap = el("div", "videowrap");
+    var box = el("div", "videobox" + (v.vertical ? " vertical" : ""));
+    var f = document.createElement("iframe");
+    f.src = youtubeEmbed(v);
+    f.title = exercise.name + " のやり方";
+    f.loading = "lazy";
+    f.allow = "accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen";
+    f.setAttribute("allowfullscreen", "");
+    f.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
+    box.appendChild(f);
+    wrap.appendChild(box);
+    return wrap;
+  }
+
   /* ±ボタンの長押しで連続増減。何度もタップさせないため。
      最初の1回はclickが担当し、こちらは400ms押し続けたあとの繰り返しだけを受け持つ */
   function holdRepeat(btn, step) {
@@ -892,6 +951,7 @@
     openExIdx: 0,
     weightDraft: null,
     openParts: {},
+    openVideo: null,
     settingsFilter: "すべて",
     settingsQuery: "",
     histTab: 0,
@@ -1476,6 +1536,24 @@
         recs[0].se.sets.map(function (x) { return setLabel(m, x.weight, x.reps); }).join(" / ")
       : "この種目の記録はまだありません";
     body.appendChild(el("div", "prev", esc(prevTxt)));
+
+    /* やり方の動画。設定されている種目だけボタンを出す。
+       押されたときに初めて iframe を作るので、普段は通信しない */
+    var exDef = exById(se.exerciseId);
+    if (exDef && parseYouTube(exDef.videoUrl)) {
+      var vOpen = S.openVideo === se.exerciseId;
+      var vBtn = el("button", "videobtn" + (vOpen ? " on" : ""),
+        vOpen ? "▾ 動画を閉じる" : "▶ やり方を見る");
+      vBtn.addEventListener("click", function () {
+        S.openVideo = vOpen ? null : se.exerciseId;
+        render();
+      });
+      body.appendChild(vBtn);
+      if (vOpen) {
+        var vbox = videoBox(exDef);
+        if (vbox) body.appendChild(vbox);
+      }
+    }
 
     /* ウォームアップ（表示のみ・記録しない） */
     var wNow = se.sets.length ? se.sets[se.sets.length - 1].weight : suggestWeight(se.exerciseId);
@@ -2373,8 +2451,54 @@
         function () { e.goal1RM = Math.round((e.goal1RM + 2.5) * 10) / 10; render(); });
     }
 
-    p = group("やり方の動画");
-    rowBtn(p, "YouTubeのURLを紐付ける", "種目名の横から1タップで開く", '<span class="badge">v2</span>', null, true);
+    /* --- やり方の動画 --- */
+    var v0 = parseYouTube(e.videoUrl);
+    p = group("やり方の動画", null,
+      "YouTubeのURLを貼るだけ。通常の動画でもショートでも構いません。トレーニング中は種目を開いた画面から再生できます");
+    var vr = el("div", "row");
+    var vi = el("input");
+    vi.type = "text";
+    vi.value = e.videoUrl || "";
+    vi.placeholder = "https://www.youtube.com/shorts/...";
+    vi.style.fontSize = "16px";
+    vi.addEventListener("change", function () {
+      var val = this.value.trim();
+      if (val && !parseYouTube(val)) { toast("YouTubeのURLとして読めません"); return; }
+      e.videoUrl = val || null;
+      save("exercises");
+      render();
+    });
+    vr.appendChild(vi); p.appendChild(vr);
+
+    if (v0) {
+      var vp = el("div", "row");
+      vp.style.display = "block";
+      var vb = videoBox(e);
+      if (vb) vp.appendChild(vb);
+      p.appendChild(vp);
+      var clr = el("div", "row");
+      clr.innerHTML = '<span class="main"><span class="s">' +
+        (v0.vertical ? "ショート動画として表示します" : "通常の動画として表示します") + "</span></span>";
+      var rm = el("button", "ghost", "外す");
+      rm.style.flex = "none"; rm.style.padding = "6px 14px";
+      rm.addEventListener("click", function () {
+        e.videoUrl = null; save("exercises"); render();
+      });
+      clr.appendChild(rm);
+      p.appendChild(clr);
+    } else if (e.name) {
+      /* 22種目ぶんURLを探すのは手間なので、検索だけは1タップで開けるようにする */
+      var sr = el("a", "row");
+      sr.href = youtubeSearchUrl(e.name);
+      sr.target = "_blank";
+      sr.rel = "noopener";
+      sr.style.color = "var(--accent)";
+      sr.style.textDecoration = "none";
+      sr.innerHTML = '<span class="main"><span class="t">YouTubeでこの種目を検索</span>' +
+        '<span class="s">「' + esc(e.name) + ' やり方 フォーム」で開きます</span></span>' +
+        '<span class="r"><span class="chev">›</span></span>';
+      p.appendChild(sr);
+    }
 
     if (!isNew) {
       var used = DB.sessions.some(function (s) {
