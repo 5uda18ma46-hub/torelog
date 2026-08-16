@@ -612,9 +612,8 @@
     weeklyTarget: 2,
     theme: "system",
     startWeight: 59.0,
-    /* ホームに大きく出す1種目。グラフで最後に見た種目が入る。
-       null なら記録が最も多い種目を自動で選ぶ */
-    homeExerciseId: null
+    /* グラフタブで前回見ていた種目。null なら記録が最も多い種目を自動で選ぶ */
+    chartExerciseId: null
   };
 
   /* =========================================================
@@ -800,11 +799,12 @@
       return r.length >= 1;
     });
   }
-  /* ホームに出す1種目。グラフで最後に見た種目。未設定なら記録が最も多い種目 */
-  function homeExerciseId() {
-    var pool = chartableExercises().filter(function (e) { return recordsOf(e.id).length >= 2; });
+  /* グラフタブで最初に開く種目。前回見た種目を覚えておく。
+     未設定なら記録が最も多い種目 */
+  function defaultChartExerciseId() {
+    var pool = chartableExercises();
     if (!pool.length) return null;
-    var chosen = DB.settings.homeExerciseId;
+    var chosen = DB.settings.chartExerciseId;
     if (chosen && pool.some(function (e) { return e.id === chosen; })) return chosen;
     return pool.slice().sort(function (a, b) {
       return recordsOf(b.id).length - recordsOf(a.id).length;
@@ -1216,27 +1216,8 @@
       '<div class="card-note">帯は筋肥大の目安 10〜16セット</div>';
     appEl.appendChild(pc);
 
-    /* --- ホームに出す1種目の推定1RM --- */
-    var homeId = homeExerciseId();
-    if (homeId) {
-      var e2 = exById(homeId);
-      var recs = recordsOf(homeId).slice().reverse();
-      var rc = el("button", "card");
-      rc.style.textAlign = "left";
-      rc.style.cursor = "pointer";
-      rc.style.font = "inherit";
-      rc.style.color = "inherit";
-      rc.innerHTML =
-        '<div class="card-head"><span class="card-k">' + esc(e2.name) + " 推定1RM</span>" +
-        '<span class="card-note">過去' + recs.length + "回 ・ グラフを見る ›</span></div>" +
-        '<div class="hero"><span class="n">' + recs[recs.length - 1].rm + "<small>kg</small></span></div>" +
-        '<svg class="spark" viewBox="0 0 320 46" preserveAspectRatio="none"></svg>';
-      spark(rc.querySelector("svg"), recs.map(function (r) { return r.rm; }));
-      rc.addEventListener("click", function () {
-        S.chartLift = homeId; S.tab = "charts"; S.stack = []; render(); scrollTop();
-      });
-      appEl.appendChild(rc);
-    }
+    /* 種目ごとの推移はグラフタブに集約する。
+       ホームで1種目だけ見せても、結局グラフタブを開くことになるため。 */
 
     /* --- 直近のトレーニング --- */
     var p2 = group("直近のトレーニング");
@@ -1950,7 +1931,7 @@
     var pool = chartableExercises();
     if (pool.length) {
       if (!S.chartLift || !pool.some(function (e) { return e.id === S.chartLift; })) {
-        S.chartLift = homeExerciseId() || pool[0].id;
+        S.chartLift = defaultChartExerciseId() || pool[0].id;
       }
       var e2 = exById(S.chartLift);
       var recs = recordsOf(S.chartLift).slice().reverse();
@@ -1962,8 +1943,8 @@
         var b = el("button", "chip" + (e3.id === S.chartLift ? " on" : ""), esc(e3.name));
         b.addEventListener("click", function () {
           S.chartLift = e3.id;
-          /* 選んだ種目をホームにも反映する */
-          DB.settings.homeExerciseId = e3.id;
+          /* 次に開いたときも同じ種目を出す */
+          DB.settings.chartExerciseId = e3.id;
           save("settings");
           render();
         });
