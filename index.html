@@ -2722,7 +2722,9 @@
     btns.appendChild(copy); btns.appendChild(dl);
     appEl.appendChild(btns);
 
-    var p2 = group("読み込み", null, "書き出したJSONを貼り付けて取り込みます。今のデータは上書きされます");
+    var p2 = group("読み込み", null,
+      "バックアップ全体のJSONなら、今のデータを上書きして復元します。" +
+      "1回分だけの記録（workout-log-session 形式）なら、今のデータを残したまま追加します");
     var ta2 = el("textarea", "json");
     ta2.placeholder = "ここにJSONを貼り付ける";
     var w2 = el("div", "row"); w2.style.display = "block"; w2.appendChild(ta2);
@@ -2754,9 +2756,56 @@
       programs: DB.programs, sessions: DB.sessions, bodyLogs: DB.bodyLogs
     };
   }
+  /* 過去の1回分だけを追加する形式。
+     全体を上書きするバックアップと違い、今のデータを壊さずに済む。
+     セットは [重量, 回数] の配列で受け取り、種目の設定（部位・レップ範囲・レスト）は
+     取り込む時点の種目マスタから作る。 */
+  function importSession(d) {
+    if (!d.date || !d.exercises || !d.exercises.length) { toast("記録の中身がありません"); return false; }
+    var dup = DB.sessions.filter(function (x) { return x.date === d.date; });
+    var msg = md(d.date) + "（" + dow(d.date) + "）の記録を " + d.exercises.length + " 種目ぶん追加します。";
+    if (dup.length) msg += "\n※ この日にはすでに " + dup.length + " 件の記録があります。";
+    if (!confirm(msg)) return false;
+
+    var base = new Date(d.date + "T19:00:00");
+    var t = base.getTime();
+    var items = [];
+    var unknown = [];
+    d.exercises.forEach(function (x) {
+      var e = exById(x.exerciseId);
+      if (!e) { unknown.push(x.exerciseId); return; }
+      items.push({
+        exerciseId: e.id,
+        snapshot: { name: e.name, part: e.part, metric: e.metric,
+          repLo: e.repLo, repHi: e.repHi, restSec: e.restSec },
+        plannedSets: x.sets.length,
+        skipped: false,
+        sets: x.sets.map(function (st) {
+          t += (e.restSec || 90) * 1000 + 45000;
+          return { weight: Number(st[0]) || 0, reps: Number(st[1]) || 0,
+            loggedAt: new Date(t).toISOString() };
+        })
+      });
+    });
+    if (unknown.length) { toast("知らない種目があります: " + unknown[0]); return false; }
+
+    DB.sessions.push({
+      id: rid("ses"), programId: d.programId || null, date: d.date,
+      startedAt: base.toISOString(), endedAt: new Date(t).toISOString(),
+      backfilled: true,
+      bodyWeightAtTime: Number(d.bodyWeightAtTime) || bodyWeightOn(d.date),
+      note: d.note || "", exercises: items
+    });
+    save("sessions");
+    S.stack = []; S.tab = "history"; render();
+    toast(md(d.date) + " の記録を追加しました");
+    return true;
+  }
+
   function importAll(text, skipConfirm) {
     var d;
     try { d = JSON.parse(text); } catch (e) { toast("JSONとして読めませんでした"); return false; }
+    if (d.app === "workout-log-session") return importSession(d);
     if (d.app !== "workout-log") { toast("このアプリのバックアップではありません"); return false; }
     if (d.schemaVersion > SCHEMA) { toast("新しいバージョンのデータです。アプリを更新してください"); return false; }
     if (!skipConfirm && !confirm("今のデータを上書きします。よろしいですか？")) return false;
