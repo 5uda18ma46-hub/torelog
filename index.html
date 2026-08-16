@@ -52,7 +52,18 @@
   /* ±を連打したときにダブルタップと解釈されて画面が拡大するのを止める。
      ピンチでの拡大は残す（manipulation はダブルタップだけを無効にする）。 */
   html, body, button, input, label, .row, .chip, .tab { touch-action: manipulation; }
-  button { -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+  /* 連打や長押しで文字が選択されるのを止める。
+     iOSは要素を押し続けると選択を始めるので、長押しで増減する±が特に引っかかる。
+     入力欄とテキストエリアだけは選択できるまま残す（バックアップのコピーに必要）。 */
+  #shell {
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input, textarea {
+    -webkit-user-select: text; user-select: text;
+    -webkit-touch-callout: default;
+  }
+  button { -webkit-tap-highlight-color: transparent; }
   body {
     margin: 0; background: var(--ground); color: var(--ink);
     font-family: var(--font-ui); font-size: 15px; line-height: 1.6;
