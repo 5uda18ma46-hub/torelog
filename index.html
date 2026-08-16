@@ -163,6 +163,8 @@
   .row .v small { font-size: 10px; font-weight: 500; color: var(--ink-3); margin-left: 1px; }
   .row.dim .t, .row.dim .s { color: var(--ink-3); }
   .row.dated { grid-template-columns: 44px 1fr auto; }
+  .row.exrow { grid-template-columns: 1fr 64px auto 12px; gap: 9px; }
+  .minispark { width: 64px; height: 24px; display: block; }
   .row .dt { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
   .row .dt small { display: block; font-size: 10px; font-weight: 550; color: var(--ink-3); }
   .chev { color: var(--ink-3); font-size: 15px; }
@@ -611,9 +613,7 @@
     goalPhase: "bulk",
     weeklyTarget: 2,
     theme: "system",
-    startWeight: 59.0,
-    /* グラフタブで前回見ていた種目。null なら記録が最も多い種目を自動で選ぶ */
-    chartExerciseId: null
+    startWeight: 59.0
   };
 
   /* =========================================================
@@ -799,18 +799,6 @@
       return r.length >= 1;
     });
   }
-  /* グラフタブで最初に開く種目。前回見た種目を覚えておく。
-     未設定なら記録が最も多い種目 */
-  function defaultChartExerciseId() {
-    var pool = chartableExercises();
-    if (!pool.length) return null;
-    var chosen = DB.settings.chartExerciseId;
-    if (chosen && pool.some(function (e) { return e.id === chosen; })) return chosen;
-    return pool.slice().sort(function (a, b) {
-      return recordsOf(b.id).length - recordsOf(a.id).length;
-    })[0].id;
-  }
-
   /* その日時点の体重（自重種目の挙上量に使う）。無ければ直近の記録に落とす */
   function bodyWeightOn(key) {
     var best = null;
@@ -902,7 +890,6 @@
     histTab: 0,
     histQuery: "",
     chartRange: 8,
-    chartLift: null,
     draftExercise: null
   };
   function here() { return S.stack.length ? S.stack[S.stack.length - 1] : { name: S.tab, arg: null }; }
@@ -1317,6 +1304,30 @@
       row.appendChild(del);
       p.appendChild(row);
     });
+  }
+
+  /* リストの行に置く小さな推移線。軸もラベルもなし */
+  function miniSpark(svg, vals) {
+    if (!vals.length) return;
+    var W = 64, H = 24, pad = 3;
+    var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
+    var span = (max - min) || 1;
+    if (vals.length === 1) {
+      svg.innerHTML = '<circle cx="' + (W / 2) + '" cy="' + (H / 2) +
+        '" r="2.5" fill="var(--ink-3)"></circle>';
+      return;
+    }
+    var pts = vals.map(function (v, i) {
+      return [pad + i * (W - pad * 2) / (vals.length - 1),
+        H - pad - (v - min) / span * (H - pad * 2)];
+    });
+    var line = pts.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
+    var last = pts[pts.length - 1];
+    svg.innerHTML =
+      '<polyline points="' + line + '" fill="none" stroke="var(--accent)" stroke-width="1.5" ' +
+      'stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>' +
+      '<circle cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) +
+      '" r="2.2" fill="var(--accent)"></circle>';
   }
 
   function spark(svg, vals) {
@@ -1833,6 +1844,33 @@
       '<div class="tile"><span class="k">最終</span><span class="v">' + md(recs[0].s.date) + "</span></div>";
     appEl.appendChild(t);
 
+    /* 推定1RMの推移。グラフタブの種目リストからも履歴の種目順からも、ここに来る */
+    var asc = recs.slice().reverse();
+    var vals = asc.map(function (r) { return r.rm; });
+    if (vals.length >= 2 && best > 0) {
+      var goal = e ? (e.goal1RM || 0) : 0;
+      var d0 = Math.round((vals[vals.length - 1] - vals[0]) * 10) / 10;
+      var rest2 = goal ? Math.round((goal - vals[vals.length - 1]) * 10) / 10 : null;
+      var c = el("div", "card");
+      c.innerHTML = '<div class="card-head"><span class="card-k">推定1RM</span>' +
+        '<span class="card-note">重量 × 回数から推定</span></div>' +
+        '<div class="hero"><span class="n">' + vals[vals.length - 1] + "<small>kg</small></span>" +
+        '<span class="d">' + (d0 >= 0 ? "<b>+" + d0 + "kg</b>" : '<b class="down">' + d0 + "kg</b>") +
+        " / " + recs.length + "回" +
+        (rest2 !== null ? (rest2 > 0 ? "　目標まで残り " + rest2 + "kg" : "　目標を達成") : "") +
+        "</span></div>";
+      var cw = el("div", "chartwrap");
+      c.appendChild(cw);
+      if (goal) c.appendChild(el("div", "legend", '<i><span class="key goal"></span>目標の推定1RM</i>'));
+      appEl.appendChild(c);
+      lineChart(cw, {
+        vals: vals, labels: asc.map(function (r) { return md(r.s.date); }),
+        aria: (e ? e.name : "種目") + "の推定1RMの推移", goal: goal,
+        fmtY: function (x) { return Math.round(x); },
+        tip: function (i) { return vals[i] + "kg<span>" + md(asc[i].s.date) + "</span>"; }
+      });
+    }
+
     var p = group("記録", "新しい順");
     recs.forEach(function (r, i) {
       var m = r.se.snapshot.metric;
@@ -1924,61 +1962,37 @@
       Math.round(vols.reduce(function (a, b) { return a + b; }, 0) / 1000) + "<small>t</small></span></div>";
     appEl.appendChild(t);
 
-    /* 推定1RM
-       記録がある種目はすべて選べる。推定1RMが出せない種目
-       （プランクなどの時間種目、自重のみの種目）だけ外す。並びは種目マスタの順。
-       ここで選んだ種目が、そのままホーム画面に出る種目になる。 */
-    var pool = chartableExercises();
+    /* 種目別の伸び
+       チップの横スクロールで探させると、種目が増えるほど手間になる。
+       縦のリストにして、各行に推移線と現在値を出す。探す手間がなくなるだけでなく
+       「どれが伸びていて、どれが止まっているか」が一覧で分かる。
+       推定1RMが出せない種目（時間・自重のみ）は外す。 */
+    var pool = chartableExercises().map(function (e) {
+      var recs = recordsOf(e.id).slice().reverse(); // 古い順
+      return { e: e, recs: recs, last: recs[recs.length - 1] };
+    }).sort(function (a, b) {
+      return a.last.s.date < b.last.s.date ? 1 : a.last.s.date > b.last.s.date ? -1 : 0;
+    });
+
     if (pool.length) {
-      if (!S.chartLift || !pool.some(function (e) { return e.id === S.chartLift; })) {
-        S.chartLift = defaultChartExerciseId() || pool[0].id;
-      }
-      var e2 = exById(S.chartLift);
-      var recs = recordsOf(S.chartLift).slice().reverse();
-      var c = el("div", "card");
-      c.innerHTML = '<div class="card-head"><span class="card-k">推定1RM</span>' +
-        '<span class="card-note">重量 × 回数から推定</span></div>';
-      var lc = el("div", "chiprow");
-      pool.forEach(function (e3) {
-        var b = el("button", "chip" + (e3.id === S.chartLift ? " on" : ""), esc(e3.name));
-        b.addEventListener("click", function () {
-          S.chartLift = e3.id;
-          /* 次に開いたときも同じ種目を出す */
-          DB.settings.chartExerciseId = e3.id;
-          save("settings");
-          render();
-        });
+      var lc = group("種目別の伸び", "最近やった順");
+      pool.forEach(function (x) {
+        var vals = x.recs.map(function (r) { return r.rm; });
+        var now = vals[vals.length - 1];
+        var diff = vals.length >= 2 ? Math.round((now - vals[vals.length - 2]) * 10) / 10 : null;
+        var b = el("button", "row exrow");
+        b.innerHTML =
+          '<span class="main"><span class="t">' + esc(x.e.name) + '</span>' +
+          '<span class="s">' + PART_LABEL[x.e.part] + ' ・ ' + GEAR_LABEL[x.e.gear] + '</span></span>' +
+          '<svg class="minispark" viewBox="0 0 64 24" preserveAspectRatio="none" aria-hidden="true"></svg>' +
+          '<span class="rv"><span class="v">' + now + '<small>kg</small></span>' +
+          '<span class="s">' + (diff === null ? "初回" : diff === 0 ? "前回と同じ"
+            : (diff > 0 ? "+" : "") + diff + "kg") + '</span></span>' +
+          '<span class="chev">›</span>';
+        miniSpark(b.querySelector("svg"), vals);
+        b.addEventListener("click", function () { push("exerciseHistory", x.e.id); });
         lc.appendChild(b);
       });
-      c.appendChild(lc);
-      if (recs.length >= 2) {
-        var vals = recs.map(function (r) { return r.rm; });
-        var d0 = Math.round((vals[vals.length - 1] - vals[0]) * 10) / 10;
-        var goal = e2.goal1RM || 0;
-        var rest2 = goal ? Math.round((goal - vals[vals.length - 1]) * 10) / 10 : null;
-        var hero = el("div", "hero");
-        hero.innerHTML = '<span class="n">' + vals[vals.length - 1] + "<small>kg</small></span>" +
-          '<span class="d">' + (d0 >= 0 ? "<b>+" + d0 + "kg</b>" : '<b class="down">' + d0 + "kg</b>") +
-          " / " + recs.length + "回" +
-          (rest2 !== null ? (rest2 > 0 ? "　目標まで残り " + rest2 + "kg" : "　目標を達成") : "") + "</span>";
-        c.appendChild(hero);
-        var cw = el("div", "chartwrap");
-        c.appendChild(cw);
-        if (goal) {
-          var lg2 = el("div", "legend", '<i><span class="key goal"></span>目標の推定1RM</i>');
-          c.appendChild(lg2);
-        }
-        appEl.appendChild(c);
-        lineChart(cw, {
-          vals: vals, labels: recs.map(function (r) { return md(r.s.date); }),
-          aria: e2.name + "の推定1RMの推移", goal: goal,
-          fmtY: function (x) { return Math.round(x); },
-          tip: function (i) { return vals[i] + "kg<span>" + md(recs[i].s.date) + "</span>"; }
-        });
-      } else {
-        c.appendChild(el("div", "empty", "2回以上記録すると推移が出ます"));
-        appEl.appendChild(c);
-      }
     }
 
     /* 週別 総挙上量 */
