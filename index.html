@@ -1915,10 +1915,17 @@
       Math.round(vols.reduce(function (a, b) { return a + b; }, 0) / 1000) + "<small>t</small></span></div>";
     appEl.appendChild(t);
 
-    /* 推定1RM */
-    var withData = DB.exercises.filter(function (e) { return recordsOf(e.id).length >= 1; });
-    var mains = withData.filter(function (e) { return DB.settings.mainExerciseIds.indexOf(e.id) >= 0; });
-    var pool = mains.length ? mains : withData;
+    /* 推定1RM
+       記録がある種目はすべて選べるようにする。ただし推定1RMが出せない種目
+       （プランクなどの時間種目、自重のみの種目）は意味がないので外す。
+       並びは主要種目を先頭に、残りは種目マスタの順。 */
+    var withData = DB.exercises.filter(function (e) {
+      if (e.archived) return false;
+      return recordsOf(e.id).some(function (r) { return r.rm > 0; });
+    });
+    var mainIds = DB.settings.mainExerciseIds;
+    var pool = withData.filter(function (e) { return mainIds.indexOf(e.id) >= 0; })
+      .concat(withData.filter(function (e) { return mainIds.indexOf(e.id) < 0; }));
     if (pool.length) {
       if (!S.chartLift || !pool.some(function (e) { return e.id === S.chartLift; })) S.chartLift = pool[0].id;
       var e2 = exById(S.chartLift);
