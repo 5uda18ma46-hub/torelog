@@ -616,7 +616,20 @@
     ex_squat:             "https://www.youtube.com/shorts/v585xCrfn20",
     ex_rdl:               "https://www.youtube.com/shorts/E0y3M2F9fsw",
     ex_bulgarian:         "https://www.youtube.com/shorts/2JFyKWAjM6I",
-    ex_ab_roller:         "https://www.youtube.com/shorts/l9Av2iBsn1Y"
+    ex_ab_roller:         "https://www.youtube.com/shorts/l9Av2iBsn1Y",
+    /* 同チャンネルで追加で見つかったもの */
+    ex_db_fly:            "https://www.youtube.com/shorts/ls-cMaddd-4",
+    ex_lat_pulldown:      "https://www.youtube.com/shorts/QMuhF1Z6WwA",
+    /* 以下は同チャンネルに解説がないため他チャンネル。投稿者は個別に確認済み
+       ビーレジェンド チャンネル / クイックフィット / 山岸秀匡 / GronG / MELOS */
+    ex_chest_press:       "https://www.youtube.com/watch?v=O0K65G6gqMg",
+    ex_leg_curl:          "https://www.youtube.com/watch?v=m4xM0I22gv8",
+    ex_incline_db_curl:   "https://www.youtube.com/watch?v=aGeC85bqPNA",
+    ex_rear_raise:        "https://www.youtube.com/watch?v=u6vxzIuOPYg",
+    ex_skull_crusher:     "https://www.youtube.com/watch?v=obVQR2d3_SA",
+    ex_leg_press:         "https://www.youtube.com/watch?v=789xKoQvaj0",
+    ex_calf_raise:        "https://www.youtube.com/watch?v=mHsIu475ORU",
+    ex_plank:             "https://www.youtube.com/shorts/zt_sEVZaRk4"
   };
   PRESET_EXERCISES.forEach(function (e) {
     if (RECOMMENDED_VIDEOS[e.id]) e.videoUrl = RECOMMENDED_VIDEOS[e.id];
@@ -2425,7 +2438,8 @@
         });
         appEl.appendChild(vb2);
         appEl.appendChild(el("div", "hint",
-          "今古賀翔【トレーニング科学】チャンネルの解説動画を、対応する種目にまとめて設定します。" +
+          "各種目の解説動画をまとめて設定します。主に今古賀翔【トレーニング科学】チャンネル、" +
+          "同チャンネルに解説がない種目は他チャンネルのものを使っています。" +
           "個別に変えたいときは、種目を開いてURLを貼り替えてください。"));
       }
     }
