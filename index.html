@@ -2729,6 +2729,7 @@
     var m = e && e.message;
     if (m === "no-client-id") return "クライアントIDを先に設定してください";
     if (m === "popup-closed") return "Googleの画面が閉じられました";
+    if (m === "auth-failed") return "認証できませんでした。テストユーザーの設定を確認してください";
     if (m === "not-found") return "ドライブにバックアップがまだありません";
     if (m === "gis") return "Googleに接続できません（オフラインの可能性）";
     if (m === "unauthorized") return "権限が切れました。もう一度接続してください";
@@ -2824,7 +2825,10 @@
     appEl.appendChild(el("div", "hint",
       "<b>この画面が扱うのは、このアプリが作った " + DRIVE.fileName + " だけです。</b><br>" +
       "ドライブ内の他のファイルにはアクセスできない権限（drive.file）で接続します。<br>" +
-      "同期は端末とドライブの丸ごと入れ替えです。2台で別々に記録した内容は自動では混ざりません。"));
+      "同期は端末とドライブの丸ごと入れ替えです。2台で別々に記録した内容は自動では混ざりません。<br><br>" +
+      "<b>「403: access_denied」と出るとき</b><br>" +
+      "Google Cloud の OAuth同意画面で、テストユーザーに自分のGoogleアカウントを追加してください。" +
+      "同じ画面で「アプリを公開」しておくと、再ログインを求められる頻度が下がります。"));
 
     if (d.clientId) {
       var dis = el("button", "danger", "接続を解除する");
