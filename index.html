@@ -613,7 +613,6 @@
   ];
 
   var DEFAULT_SETTINGS = {
-    heightCm: 172.4,
     goalPhase: "bulk",
     weeklyTarget: 2,
     theme: "system",
@@ -1021,15 +1020,21 @@
   /* =========================================================
      6. ホーム
      ========================================================= */
+  function activePrograms() {
+    return DB.programs.filter(function (p) { return !p.archived; });
+  }
+  /* 直近に実施したプログラムの「次」を順番に回す。プログラムが3つ以上でも成立する */
   function nextProgram() {
+    var list = activePrograms();
+    if (!list.length) return null;
     var done = doneSessions();
     for (var i = 0; i < done.length; i++) {
-      if (done[i].programId) {
-        var p = progById(done[i].programId === "prog_a" ? "prog_b" : "prog_a");
-        if (p) return p;
+      if (!done[i].programId) continue;
+      for (var j = 0; j < list.length; j++) {
+        if (list[j].id === done[i].programId) return list[(j + 1) % list.length];
       }
     }
-    return DB.programs.filter(function (p) { return !p.archived; })[0] || null;
+    return list[0];
   }
   function weekCount() {
     var d = new Date();
@@ -1088,8 +1093,12 @@
         var start = el("button", "primary big", "始める");
         start.addEventListener("click", function () { startSession(prog.id); });
         c.appendChild(start);
-        var other = DB.programs.filter(function (p) { return !p.archived && p.id !== prog.id; })[0];
-        if (other) {
+        /* 次のプログラムへ順に切り替える。3つ以上あっても押すたびに回る */
+        var list = activePrograms();
+        if (list.length > 1) {
+          var idx = 0;
+          list.forEach(function (p, i) { if (p.id === prog.id) idx = i; });
+          var other = list[(idx + 1) % list.length];
           var sw = el("button", "linkbtn", other.label + " に切り替える");
           sw.addEventListener("click", function () { S.pendingProgram = other.id; render(); });
           c.appendChild(sw);
@@ -2196,21 +2205,31 @@
      ========================================================= */
   function viewSettings() {
     nav("設定", { plain: true });
-    var p = group("プログラム");
-    DB.programs.filter(function (x) { return !x.archived; }).forEach(function (pr) {
+    var p = group("プログラム", null, "ホームでは、この順番どおりに次のメニューが回ります");
+    activePrograms().forEach(function (pr) {
       rowBtn(p, esc(pr.label), pr.items.length + " 種目", "", function () { push("programEdit", pr.id); });
     });
+    var addProg = el("button", "row");
+    addProg.style.color = "var(--accent)";
+    addProg.style.cursor = "pointer";
+    addProg.innerHTML = '<span class="main"><span class="t">＋ プログラムを追加</span></span><span class="r"></span>';
+    addProg.addEventListener("click", function () {
+      var np = { id: rid("prog"), label: "新しいメニュー", items: [], archived: false };
+      DB.programs.push(np);
+      save("programs");
+      push("programEdit", np.id);
+    });
+    p.appendChild(addProg);
 
     p = group("種目", null, "セッション画面の刻み・レスト・レップ範囲は、すべてここの設定を読みます");
     rowBtn(p, "種目マスタ",
       DB.exercises.filter(function (e) { return !e.archived; }).length + " 種目を登録済み",
       "", function () { push("exerciseList", null); });
 
-    p = group("からだ");
-    stepRow(p, "週の目標回数", null, DB.settings.weeklyTarget + "回",
+    p = group("目標");
+    stepRow(p, "週の目標回数", "頻度グラフの達成ラインになります", DB.settings.weeklyTarget + "回",
       function () { DB.settings.weeklyTarget = Math.max(1, DB.settings.weeklyTarget - 1); save("settings"); render(); },
       function () { DB.settings.weeklyTarget = Math.min(7, DB.settings.weeklyTarget + 1); save("settings"); render(); });
-    rowBtn(p, "身長", DB.settings.heightCm + "cm", "");
 
     p = group("データ", null, "v1は端末内に保存します。同期はv2で入れます");
     rowBtn(p, "バックアップと復元", DB.sessions.length + " 件のセッション", "", function () { push("data", null); });
@@ -2399,6 +2418,18 @@
     if (!prog) { pop(); return; }
     nav(prog.label, { onBack: function () { save("programs"); pop(); } });
 
+    var np = group("メニュー名", null,
+      "「Day A・上半身」のように中黒で区切ると、ホームで太字と小さい字に分かれて表示されます");
+    var nr = el("div", "row");
+    var ni = el("input");
+    ni.type = "text"; ni.value = prog.label; ni.placeholder = "例: Day C・肩と腕";
+    ni.addEventListener("input", function () { prog.label = this.value; });
+    ni.addEventListener("change", function () {
+      if (!prog.label.trim()) prog.label = "名称未設定";
+      save("programs"); render();
+    });
+    nr.appendChild(ni); np.appendChild(nr);
+
     var p = group("種目の順番とセット数", null,
       "セッション画面はこの順番で始まります。当日その場で入れ替えることもできます");
     prog.items.forEach(function (it, idx) {
@@ -2446,6 +2477,27 @@
     var add = el("button", "primary", "＋ この日に種目を追加");
     add.addEventListener("click", function () { push("exerciseList", { pick: "program", programId: prog.id }); });
     appEl.appendChild(add);
+
+    /* 削除ではなくアーカイブ。過去のセッションがこのプログラムを参照しているため */
+    var used = DB.sessions.some(function (s) { return s.programId === prog.id; });
+    if (activePrograms().length > 1) {
+      var del = el("button", "danger", "このメニューを使うのをやめる");
+      del.addEventListener("click", function () {
+        if (!confirm("「" + prog.label + "」をホームと設定から外します。過去の記録は残ります。")) return;
+        prog.archived = true;
+        save("programs");
+        S.pendingProgram = null;
+        pop();
+        toast(prog.label + " を外しました");
+      });
+      appEl.appendChild(del);
+      appEl.appendChild(el("div", "hint",
+        used ? "このメニューでの記録が残っています。削除ではなく一覧から外すだけなので、履歴は壊れません。"
+             : "まだこのメニューでの記録はありません。"));
+    } else {
+      appEl.appendChild(el("div", "hint",
+        "最後の1つのメニューは外せません。先に別のメニューを追加してください。"));
+    }
 
     /* 種目選択から戻ってきたとき用 */
     S.programPick = prog.id;
