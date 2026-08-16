@@ -600,6 +600,28 @@
     ex("ex_ab_roller", "アブローラー", "core", "bodyweight", "bodyweight_reps", 0, 60, 10, 15, 0),
     ex("ex_plank", "プランク", "core", "bodyweight", "time", 0, 60, 45, 60, 0)
   ];
+  /* やり方の動画（今古賀翔【トレーニング科学】チャンネル）
+     すべて YouTube oEmbed で投稿者を1本ずつ確認済み。
+     このチャンネルの種目フォーム解説は2024年前半に集中しているため、
+     「新しさ」より「その種目の解説が実在するか」で選んでいる。 */
+  var RECOMMENDED_VIDEOS = {
+    ex_bench_press:       "https://www.youtube.com/shorts/AKlPDkU2G5A",
+    ex_incline_db_press:  "https://www.youtube.com/shorts/rrNdoNf_Tak",
+    ex_weighted_pullup:   "https://www.youtube.com/shorts/EhQeBHP7rjE",
+    ex_seated_row:        "https://www.youtube.com/shorts/0LY1bGPPsRk",
+    ex_bb_row:            "https://www.youtube.com/shorts/0LY1bGPPsRk",
+    ex_shoulder_press:    "https://www.youtube.com/shorts/IH24_ohO4Jc",
+    ex_side_raise:        "https://www.youtube.com/shorts/-bvP-lzw6X0",
+    ex_pushdown:          "https://www.youtube.com/shorts/NAry9DhipJA",
+    ex_squat:             "https://www.youtube.com/shorts/v585xCrfn20",
+    ex_rdl:               "https://www.youtube.com/shorts/E0y3M2F9fsw",
+    ex_bulgarian:         "https://www.youtube.com/shorts/2JFyKWAjM6I",
+    ex_ab_roller:         "https://www.youtube.com/shorts/l9Av2iBsn1Y"
+  };
+  PRESET_EXERCISES.forEach(function (e) {
+    if (RECOMMENDED_VIDEOS[e.id]) e.videoUrl = RECOMMENDED_VIDEOS[e.id];
+  });
+
   /* 主要種目の当面の目標（現行プログラムの8週後マイルストーン） */
   PRESET_EXERCISES.forEach(function (e) {
     var g = { ex_bench_press: 92, ex_squat: 95, ex_weighted_pullup: 87, ex_rdl: 80 }[e.id];
@@ -2382,6 +2404,30 @@
         push("exerciseNew", null);
       });
       appEl.appendChild(b);
+
+      /* 11種目ぶん手で貼るのは手間なので、まとめて入れられるようにする */
+      var pending = Object.keys(RECOMMENDED_VIDEOS).filter(function (id) {
+        var e = exById(id);
+        return e && !e.archived && e.videoUrl !== RECOMMENDED_VIDEOS[id];
+      });
+      if (pending.length) {
+        var vb2 = el("button", "ghost", "やり方の動画をまとめて設定（" + pending.length + "種目）");
+        vb2.style.flex = "none";
+        vb2.addEventListener("click", function () {
+          var overwrite = pending.filter(function (id) { return !!exById(id).videoUrl; });
+          var msg = pending.length + " 種目に、今古賀翔さんの解説動画を設定します。";
+          if (overwrite.length) msg += "\nうち " + overwrite.length + " 種目は今の動画を置き換えます。";
+          if (!confirm(msg)) return;
+          pending.forEach(function (id) { exById(id).videoUrl = RECOMMENDED_VIDEOS[id]; });
+          save("exercises");
+          toast(pending.length + " 種目に設定しました");
+          render();
+        });
+        appEl.appendChild(vb2);
+        appEl.appendChild(el("div", "hint",
+          "今古賀翔【トレーニング科学】チャンネルの解説動画を、対応する種目にまとめて設定します。" +
+          "個別に変えたいときは、種目を開いてURLを貼り替えてください。"));
+      }
     }
   }
 
