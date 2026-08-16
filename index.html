@@ -530,6 +530,10 @@
      1. 定数とプリセット
      ========================================================= */
   var SCHEMA = 1;
+  /* 表示用のビルド番号。デプロイのたびに上げる。
+     GitHub Pages は10分キャッシュするので、
+     「今どのビルドが動いているか」が分からないと切り分けができない */
+  var APP_VERSION = "2026-08-16 #2";
   var K = {
     meta: "wl:meta", settings: "wl:settings", exercises: "wl:exercises",
     programs: "wl:programs", sessions: "wl:sessions", active: "wl:active", bodyLogs: "wl:bodyLogs"
@@ -2358,9 +2362,25 @@
       DB.settings.theme = id; save("settings"); applyTheme(); render();
     });
 
+    p = group("アプリ");
+    var vr = el("div", "row");
+    vr.innerHTML = '<span class="main"><span class="t">バージョン</span>' +
+      '<span class="s">スキーマ v' + DB.meta.schemaVersion + '</span></span>' +
+      '<span class="r">' + APP_VERSION + "</span>";
+    p.appendChild(vr);
+    var up2 = el("button", "row");
+    up2.style.color = "var(--accent)";
+    up2.style.cursor = "pointer";
+    up2.innerHTML = '<span class="main"><span class="t">最新版に更新する</span>' +
+      '<span class="s">キャッシュを外して読み込み直します。記録は消えません</span></span>' +
+      '<span class="r"><span class="chev">›</span></span>';
+    up2.addEventListener("click", function () {
+      location.replace(location.pathname + "?v=" + Date.now());
+    });
+    p.appendChild(up2);
+
     appEl.appendChild(el("div", "hint",
-      "スキーマ v" + DB.meta.schemaVersion + " ・ 最終更新 " +
-      new Date(DB.meta.updatedAt).toLocaleString("ja-JP")));
+      "最終更新 " + new Date(DB.meta.updatedAt).toLocaleString("ja-JP")));
   }
 
   function viewExerciseList(opt) {
