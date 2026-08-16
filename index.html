@@ -612,7 +612,9 @@
     weeklyTarget: 2,
     theme: "system",
     startWeight: 59.0,
-    mainExerciseIds: ["ex_bench_press", "ex_weighted_pullup", "ex_squat", "ex_rdl"]
+    /* ホームに大きく出す1種目。グラフで最後に見た種目が入る。
+       null なら記録が最も多い種目を自動で選ぶ */
+    homeExerciseId: null
   };
 
   /* =========================================================
@@ -790,6 +792,25 @@
     if (DB.bodyLogs.length) return DB.bodyLogs[DB.bodyLogs.length - 1].weight;
     return DB.settings.startWeight;
   }
+  /* 推定1RMを出せる種目のうち、記録が2回以上あるもの（グラフ・ホーム共通の母集団） */
+  function chartableExercises() {
+    return DB.exercises.filter(function (e) {
+      if (e.archived) return false;
+      var r = recordsOf(e.id).filter(function (x) { return x.rm > 0; });
+      return r.length >= 1;
+    });
+  }
+  /* ホームに出す1種目。グラフで最後に見た種目。未設定なら記録が最も多い種目 */
+  function homeExerciseId() {
+    var pool = chartableExercises().filter(function (e) { return recordsOf(e.id).length >= 2; });
+    if (!pool.length) return null;
+    var chosen = DB.settings.homeExerciseId;
+    if (chosen && pool.some(function (e) { return e.id === chosen; })) return chosen;
+    return pool.slice().sort(function (a, b) {
+      return recordsOf(b.id).length - recordsOf(a.id).length;
+    })[0].id;
+  }
+
   /* その日時点の体重（自重種目の挙上量に使う）。無ければ直近の記録に落とす */
   function bodyWeightOn(key) {
     var best = null;
@@ -1195,18 +1216,25 @@
       '<div class="card-note">帯は筋肥大の目安 10〜16セット</div>';
     appEl.appendChild(pc);
 
-    /* --- 主要種目の推定1RM --- */
-    var mainId = DB.settings.mainExerciseIds.filter(function (id) { return recordsOf(id).length >= 2; })[0];
-    if (mainId) {
-      var e2 = exById(mainId);
-      var recs = recordsOf(mainId).slice().reverse();
-      var rc = el("div", "card");
+    /* --- ホームに出す1種目の推定1RM --- */
+    var homeId = homeExerciseId();
+    if (homeId) {
+      var e2 = exById(homeId);
+      var recs = recordsOf(homeId).slice().reverse();
+      var rc = el("button", "card");
+      rc.style.textAlign = "left";
+      rc.style.cursor = "pointer";
+      rc.style.font = "inherit";
+      rc.style.color = "inherit";
       rc.innerHTML =
         '<div class="card-head"><span class="card-k">' + esc(e2.name) + " 推定1RM</span>" +
-        '<span class="card-note">過去' + recs.length + "回</span></div>" +
+        '<span class="card-note">過去' + recs.length + "回 ・ グラフを見る ›</span></div>" +
         '<div class="hero"><span class="n">' + recs[recs.length - 1].rm + "<small>kg</small></span></div>" +
         '<svg class="spark" viewBox="0 0 320 46" preserveAspectRatio="none"></svg>';
       spark(rc.querySelector("svg"), recs.map(function (r) { return r.rm; }));
+      rc.addEventListener("click", function () {
+        S.chartLift = homeId; S.tab = "charts"; S.stack = []; render(); scrollTop();
+      });
       appEl.appendChild(rc);
     }
 
@@ -1666,7 +1694,7 @@
       list.forEach(function (s) {
         var prog = s.programId ? progById(s.programId) : null;
         var hasPr = s.exercises.some(function (se) {
-          return DB.settings.mainExerciseIds.indexOf(se.exerciseId) >= 0 && isPr(se, s);
+          return isPr(se, s);
         });
         var b = el("button", "row dated");
         b.innerHTML =
@@ -1916,18 +1944,14 @@
     appEl.appendChild(t);
 
     /* 推定1RM
-       記録がある種目はすべて選べるようにする。ただし推定1RMが出せない種目
-       （プランクなどの時間種目、自重のみの種目）は意味がないので外す。
-       並びは主要種目を先頭に、残りは種目マスタの順。 */
-    var withData = DB.exercises.filter(function (e) {
-      if (e.archived) return false;
-      return recordsOf(e.id).some(function (r) { return r.rm > 0; });
-    });
-    var mainIds = DB.settings.mainExerciseIds;
-    var pool = withData.filter(function (e) { return mainIds.indexOf(e.id) >= 0; })
-      .concat(withData.filter(function (e) { return mainIds.indexOf(e.id) < 0; }));
+       記録がある種目はすべて選べる。推定1RMが出せない種目
+       （プランクなどの時間種目、自重のみの種目）だけ外す。並びは種目マスタの順。
+       ここで選んだ種目が、そのままホーム画面に出る種目になる。 */
+    var pool = chartableExercises();
     if (pool.length) {
-      if (!S.chartLift || !pool.some(function (e) { return e.id === S.chartLift; })) S.chartLift = pool[0].id;
+      if (!S.chartLift || !pool.some(function (e) { return e.id === S.chartLift; })) {
+        S.chartLift = homeExerciseId() || pool[0].id;
+      }
       var e2 = exById(S.chartLift);
       var recs = recordsOf(S.chartLift).slice().reverse();
       var c = el("div", "card");
@@ -1936,7 +1960,13 @@
       var lc = el("div", "chiprow");
       pool.forEach(function (e3) {
         var b = el("button", "chip" + (e3.id === S.chartLift ? " on" : ""), esc(e3.name));
-        b.addEventListener("click", function () { S.chartLift = e3.id; render(); });
+        b.addEventListener("click", function () {
+          S.chartLift = e3.id;
+          /* 選んだ種目をホームにも反映する */
+          DB.settings.homeExerciseId = e3.id;
+          save("settings");
+          render();
+        });
         lc.appendChild(b);
       });
       c.appendChild(lc);
