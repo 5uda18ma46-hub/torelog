@@ -616,7 +616,10 @@
     goalPhase: "bulk",
     weeklyTarget: 2,
     theme: "system",
-    startWeight: 59.0
+    startWeight: 59.0,
+    /* Googleドライブ同期。clientId は Google Cloud で作った OAuth クライアントID。
+       ブラウザアプリのクライアントIDは秘密情報ではないので、そのまま保存してよい */
+    drive: { clientId: "", fileId: "", lastSyncAt: null, auto: true }
   };
 
   /* =========================================================
@@ -927,7 +930,7 @@
       charts: [viewCharts, null], settings: [viewSettings, null],
       exerciseList: [viewExerciseList, null], exerciseEdit: [viewExerciseEdit, null],
       exerciseNew: [viewExerciseNew, null], programEdit: [viewProgramEdit, null],
-      data: [viewData, null], weightLog: [viewWeightLog, null]
+      data: [viewData, null], weightLog: [viewWeightLog, null], sync: [viewSync, null]
     };
     (R[v.name] || R.home)[0](v.arg);
     renderTabs();
@@ -1636,6 +1639,7 @@
     save("sessions"); save("active");
     stopRest();
     toast("記録しました（" + fmtInt(sessionVolume(s)) + "kg）");
+    driveAutoUpload();
     S.stack = []; S.tab = "home"; render();
   }
 
@@ -2233,7 +2237,7 @@
 
     p = group("データ", null, "v1は端末内に保存します。同期はv2で入れます");
     rowBtn(p, "バックアップと復元", DB.sessions.length + " 件のセッション", "", function () { push("data", null); });
-    rowBtn(p, "Googleドライブ同期", "端末を変えても記録を引き継ぐ", '<span class="badge">v2</span>', null, true);
+    rowBtn(p, "Googleドライブ同期", driveStatusLine(), "", function () { push("sync", null); });
 
     p = group("表示");
     var themes = [{ id: "system", label: "端末に合わせる" }, { id: "light", label: "ライト" }, { id: "dark", label: "ダーク" }];
@@ -2566,12 +2570,12 @@
       programs: DB.programs, sessions: DB.sessions, bodyLogs: DB.bodyLogs
     };
   }
-  function importAll(text) {
+  function importAll(text, skipConfirm) {
     var d;
-    try { d = JSON.parse(text); } catch (e) { toast("JSONとして読めませんでした"); return; }
-    if (d.app !== "workout-log") { toast("このアプリのバックアップではありません"); return; }
-    if (d.schemaVersion > SCHEMA) { toast("新しいバージョンのデータです。アプリを更新してください"); return; }
-    if (!confirm("今のデータを上書きします。よろしいですか？")) return;
+    try { d = JSON.parse(text); } catch (e) { toast("JSONとして読めませんでした"); return false; }
+    if (d.app !== "workout-log") { toast("このアプリのバックアップではありません"); return false; }
+    if (d.schemaVersion > SCHEMA) { toast("新しいバージョンのデータです。アプリを更新してください"); return false; }
+    if (!skipConfirm && !confirm("今のデータを上書きします。よろしいですか？")) return false;
     DB.settings = Object.assign(clone(DEFAULT_SETTINGS), d.settings || {});
     DB.exercises = d.exercises || clone(PRESET_EXERCISES);
     DB.programs = d.programs || clone(PRESET_PROGRAMS);
@@ -2581,6 +2585,257 @@
     ["settings", "exercises", "programs", "sessions", "bodyLogs", "active"].forEach(save);
     S.stack = []; S.tab = "home"; render();
     toast("取り込みました");
+    return true;
+  }
+
+  /* =========================================================
+     10.5 Googleドライブ同期
+
+     サーバーを持たない静的サイトなので、ブラウザから直接 Drive API を叩く。
+     スコープは drive.file（このアプリが作ったファイルだけ）。
+     ユーザーの他のファイルには一切アクセスしない。
+
+     トークンはメモリにだけ置く（有効期限は約1時間）。localStorage には保存しない。
+     ========================================================= */
+  var DRIVE = {
+    scope: "https://www.googleapis.com/auth/drive.file",
+    fileName: "torelog-backup.json",
+    token: null,          // { value, expiresAt }
+    tokenClient: null,
+    gisLoading: null
+  };
+
+  function driveCfg() { return DB.settings.drive || (DB.settings.drive = { clientId: "", fileId: "", lastSyncAt: null, auto: true }); }
+  function driveStatusLine() {
+    var d = driveCfg();
+    if (!d.clientId) return "未設定";
+    if (!d.lastSyncAt) return "接続の準備ができています";
+    return "最終同期 " + new Date(d.lastSyncAt).toLocaleString("ja-JP");
+  }
+  function driveTokenValid() {
+    return DRIVE.token && DRIVE.token.expiresAt > Date.now() + 30000;
+  }
+
+  /* Google Identity Services は必要になったときだけ読み込む。
+     読み込まなければアプリは完全にオフラインで動く */
+  function loadGis() {
+    if (window.google && window.google.accounts && window.google.accounts.oauth2) return Promise.resolve();
+    if (DRIVE.gisLoading) return DRIVE.gisLoading;
+    DRIVE.gisLoading = new Promise(function (resolve, reject) {
+      var sc = document.createElement("script");
+      sc.src = "https://accounts.google.com/gsi/client";
+      sc.async = true;
+      sc.onload = function () { resolve(); };
+      sc.onerror = function () { DRIVE.gisLoading = null; reject(new Error("gis")); };
+      document.head.appendChild(sc);
+    });
+    return DRIVE.gisLoading;
+  }
+
+  /* アクセストークンを取る。初回と期限切れのときだけ Google の画面が出る */
+  function driveAuth(interactive) {
+    var d = driveCfg();
+    if (!d.clientId) return Promise.reject(new Error("no-client-id"));
+    if (driveTokenValid()) return Promise.resolve(DRIVE.token.value);
+    return loadGis().then(function () {
+      return new Promise(function (resolve, reject) {
+        DRIVE.tokenClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: d.clientId,
+          scope: DRIVE.scope,
+          callback: function (res) {
+            if (res && res.access_token) {
+              DRIVE.token = {
+                value: res.access_token,
+                expiresAt: Date.now() + (Number(res.expires_in || 3600) * 1000)
+              };
+              resolve(res.access_token);
+            } else reject(new Error("no-token"));
+          },
+          error_callback: function (err) {
+            reject(new Error(err && err.type === "popup_closed" ? "popup-closed" : "auth-failed"));
+          }
+        });
+        DRIVE.tokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
+      });
+    });
+  }
+
+  function driveFetch(url, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({ Authorization: "Bearer " + DRIVE.token.value }, opts.headers || {});
+    return fetch(url, opts).then(function (r) {
+      if (r.status === 401) { DRIVE.token = null; throw new Error("unauthorized"); }
+      if (!r.ok) throw new Error("http-" + r.status);
+      return r;
+    });
+  }
+
+  /* Drive 上のバックアップを探す。見つかれば {id, modifiedTime} */
+  function driveFindFile() {
+    var d = driveCfg();
+    var q = encodeURIComponent("name = '" + DRIVE.fileName + "' and trashed = false");
+    return driveFetch("https://www.googleapis.com/drive/v3/files?q=" + q +
+      "&spaces=drive&fields=files(id,name,modifiedTime)&pageSize=10")
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var f = (j.files || [])[0] || null;
+        if (f) { d.fileId = f.id; save("settings"); }
+        return f;
+      });
+  }
+
+  function driveUpload() {
+    var d = driveCfg();
+    var body = JSON.stringify(exportAll());
+    return driveFindFile().then(function (f) {
+      if (f) {
+        return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + f.id + "?uploadType=media", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: body
+        });
+      }
+      /* 初回はメタデータと中身をまとめて送る */
+      var boundary = "torelog" + Date.now();
+      var meta = { name: DRIVE.fileName, mimeType: "application/json",
+        description: "ToreLog のバックアップ" };
+      var multipart =
+        "--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" +
+        JSON.stringify(meta) + "\r\n" +
+        "--" + boundary + "\r\nContent-Type: application/json\r\n\r\n" +
+        body + "\r\n--" + boundary + "--";
+      return driveFetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
+        method: "POST",
+        headers: { "Content-Type": 'multipart/related; boundary="' + boundary + '"' },
+        body: multipart
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        d.fileId = j.id; save("settings");
+      });
+    }).then(function () {
+      d.lastSyncAt = new Date().toISOString();
+      save("settings");
+    });
+  }
+
+  function driveDownload() {
+    return driveFindFile().then(function (f) {
+      if (!f) throw new Error("not-found");
+      return driveFetch("https://www.googleapis.com/drive/v3/files/" + f.id + "?alt=media")
+        .then(function (r) { return r.text(); });
+    });
+  }
+
+  function driveError(e) {
+    var m = e && e.message;
+    if (m === "no-client-id") return "クライアントIDを先に設定してください";
+    if (m === "popup-closed") return "Googleの画面が閉じられました";
+    if (m === "not-found") return "ドライブにバックアップがまだありません";
+    if (m === "gis") return "Googleに接続できません（オフラインの可能性）";
+    if (m === "unauthorized") return "権限が切れました。もう一度接続してください";
+    if (m && m.indexOf("http-") === 0) return "ドライブでエラーが起きました（" + m.slice(5) + "）";
+    return "同期に失敗しました";
+  }
+
+  /* セッション終了時の自動アップロード。失敗しても記録の保存は済んでいるので黙って諦める */
+  function driveAutoUpload() {
+    var d = driveCfg();
+    if (!d.auto || !d.clientId) return;
+    driveAuth(false).then(driveUpload).then(function () {
+      toast("ドライブに同期しました");
+    }).catch(function () { /* 静かに失敗させる。記録自体は端末に残っている */ });
+  }
+
+  function viewSync() {
+    nav("Googleドライブ同期");
+    var d = driveCfg();
+
+    if (!d.clientId) {
+      appEl.appendChild(el("div", "card",
+        '<div class="empty">まだ設定されていません。<br>' +
+        'Google Cloud で作った OAuth クライアントIDを貼り付けてください。</div>'));
+    } else {
+      var t = el("div", "tiles");
+      t.innerHTML =
+        '<div class="tile"><span class="k">状態</span><span class="v" style="font-size:15px">' +
+        (driveTokenValid() ? "接続中" : "未接続") + "</span></div>" +
+        '<div class="tile"><span class="k">最終同期</span><span class="v" style="font-size:15px">' +
+        (d.lastSyncAt ? md(dateKey(new Date(d.lastSyncAt))) : "—") + "</span></div>" +
+        '<div class="tile"><span class="k">記録</span><span class="v">' + DB.sessions.length + "<small>件</small></span></div>";
+      appEl.appendChild(t);
+    }
+
+    /* --- 手動同期 --- */
+    if (d.clientId) {
+      var up = el("button", "primary", "この端末の記録をドライブへ保存");
+      up.addEventListener("click", function () {
+        up.disabled = true; up.textContent = "同期中…";
+        driveAuth(true).then(driveUpload).then(function () {
+          toast("ドライブに保存しました");
+          render();
+        }).catch(function (e) {
+          toast(driveError(e)); up.disabled = false; up.textContent = "この端末の記録をドライブへ保存";
+        });
+      });
+      appEl.appendChild(up);
+
+      var down = el("button", "ghost", "ドライブの記録をこの端末に復元");
+      down.style.flex = "none";
+      down.addEventListener("click", function () {
+        driveAuth(true).then(driveDownload).then(function (text) {
+          var j;
+          try { j = JSON.parse(text); } catch (e2) { toast("バックアップを読めませんでした"); return; }
+          var n = (j.sessions || []).length;
+          if (!confirm("ドライブには " + n + " 件の記録があります。\nこの端末の " +
+            DB.sessions.length + " 件を上書きします。よろしいですか？")) return;
+          /* importAll が DB.settings ごと差し替えるので、書き戻しは差し替え後の参照に対して行う */
+          if (!importAll(text, true)) return;
+          var fresh = driveCfg();
+          fresh.lastSyncAt = new Date().toISOString();
+          save("settings");
+        }).catch(function (e) { toast(driveError(e)); });
+      });
+      appEl.appendChild(down);
+
+      var p2 = group("自動同期");
+      switchRow(p2, "トレーニング終了時に自動で保存",
+        "失敗しても記録は端末に残ります", d.auto, function () {
+          d.auto = !d.auto; save("settings"); render();
+        });
+    }
+
+    /* --- クライアントID --- */
+    var p = group("OAuth クライアントID", null,
+      "Google Cloud で作った「ウェブアプリケーション」のクライアントID。ブラウザアプリのIDは秘密情報ではないので、そのまま保存して問題ありません");
+    var r = el("div", "row");
+    var i = el("input");
+    i.type = "text";
+    i.value = d.clientId;
+    i.placeholder = "000000000000-xxxxxxxx.apps.googleusercontent.com";
+    i.style.fontSize = "16px";
+    i.addEventListener("change", function () {
+      d.clientId = this.value.trim();
+      DRIVE.token = null;
+      save("settings");
+      toast(d.clientId ? "保存しました" : "クリアしました");
+      render();
+    });
+    r.appendChild(i); p.appendChild(r);
+
+    appEl.appendChild(el("div", "hint",
+      "<b>この画面が扱うのは、このアプリが作った " + DRIVE.fileName + " だけです。</b><br>" +
+      "ドライブ内の他のファイルにはアクセスできない権限（drive.file）で接続します。<br>" +
+      "同期は端末とドライブの丸ごと入れ替えです。2台で別々に記録した内容は自動では混ざりません。"));
+
+    if (d.clientId) {
+      var dis = el("button", "danger", "接続を解除する");
+      dis.addEventListener("click", function () {
+        if (!confirm("クライアントIDと同期の記録を消します。ドライブ上のファイルは残ります。")) return;
+        DB.settings.drive = { clientId: "", fileId: "", lastSyncAt: null, auto: true };
+        DRIVE.token = null;
+        save("settings"); render();
+      });
+      appEl.appendChild(dis);
+    }
   }
 
   /* --- サンプルデータ --- */
