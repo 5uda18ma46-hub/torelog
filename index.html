@@ -533,7 +533,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-08-16 #4";
+  var APP_VERSION = "2026-08-16 #5";
   var K = {
     meta: "wl:meta", settings: "wl:settings", exercises: "wl:exercises",
     programs: "wl:programs", sessions: "wl:sessions", active: "wl:active", bodyLogs: "wl:bodyLogs"
@@ -1739,6 +1739,26 @@
       acts.appendChild(fin);
     }
     body.appendChild(acts);
+
+    /* 種目そのものを今日のメニューから外す。
+       「後回し」や「終える」と違って戻せないので、他の操作とは離して置き、
+       記録済みのセットがあるときは件数を見せて確認する */
+    var del = el("button", "linkbtn", "この種目を削除");
+    del.style.color = "var(--warn)";
+    del.addEventListener("click", function () {
+      var n = se.sets.length;
+      var msg = n
+        ? "「" + se.snapshot.name + "」を今日のメニューから削除します。\n記録済みの " +
+          n + " セットも一緒に消えます。"
+        : "「" + se.snapshot.name + "」を今日のメニューから削除します。";
+      if (!confirm(msg)) return;
+      DB.active.exercises.splice(idx, 1);
+      S.openExIdx = firstUndone(DB.active);
+      save("active");
+      toast(se.snapshot.name + " を外しました");
+      render();
+    });
+    body.appendChild(del);
 
     card.appendChild(body);
     return card;
