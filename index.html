@@ -533,7 +533,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-08-16 #3";
+  var APP_VERSION = "2026-08-16 #4";
   var K = {
     meta: "wl:meta", settings: "wl:settings", exercises: "wl:exercises",
     programs: "wl:programs", sessions: "wl:sessions", active: "wl:active", bodyLogs: "wl:bodyLogs"
@@ -672,6 +672,8 @@
     weeklyTarget: 2,
     theme: "system",
     startWeight: 59.0,
+    restSound: true,
+    restNotify: false,
     /* Googleドライブ同期。clientId は Google Cloud で作った OAuth クライアントID。
        ブラウザアプリのクライアントIDは秘密情報ではないので、そのまま保存してよい */
     drive: { clientId: "", fileId: "", lastSyncAt: null, auto: true }
@@ -1020,7 +1022,7 @@
     appEl.innerHTML = "";
     navEl.className = "nav";
     tabsEl.style.display = v.name === "session" ? "none" : "";
-    document.getElementById("rest").style.display = v.name === "session" && restLeft > 0 ? "flex" : "none";
+    document.getElementById("rest").style.display = v.name === "session" && restActive() ? "flex" : "none";
 
     var R = {
       home: [viewHome, null], session: [viewSession, null],
@@ -1488,6 +1490,7 @@
       }).filter(Boolean)
     };
     DB.active = s;
+    Sound.arm();
     S.pendingProgram = null;
     S.openExIdx = 0;
     save("active");
@@ -1760,32 +1763,148 @@
     S.stack = []; S.tab = "home"; render();
   }
 
-  /* --- レストタイマー --- */
-  var restLeft = 0, restTotal = 0, restTimer = null;
+  /* --- レストタイマー ---
+     画面を消しても正しく動くように、2つの仕掛けを入れている。
+
+     1) 残り時間は「終了時刻」から毎回計算する。
+        カウンタを1秒ずつ減らす方式だと、iOSがタイマーを止めた分だけ時間がずれる。
+     2) レスト中は無音の音声をループ再生して、ページが止められないようにする。
+        iOSは音を鳴らしているページを生かし続けるので、画面を消しても
+        時間が来たときに音を鳴らせる。レストが終われば無音再生も止める。 */
+
+  var Sound = (function () {
+    var silenceUrl = null, alarmUrl = null, keep = null, alarm = null, ready = false;
+
+    function wav(samples, rate) {
+      var n = samples.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+      function str(o, t) { for (var i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); }
+      str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVE");
+      str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+      v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      str(36, "data"); v.setUint32(40, n * 2, true);
+      for (var i = 0; i < n; i++) {
+        var x = Math.max(-1, Math.min(1, samples[i]));
+        v.setInt16(44 + i * 2, x * 32767, true);
+      }
+      return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+    }
+
+    function build() {
+      if (ready) return;
+      var rate = 22050;
+      var sil = new Float32Array(rate); /* 1秒の無音 */
+      silenceUrl = wav(sil, rate);
+
+      /* ピッ・ピッ・ピーッ */
+      var beats = [[0.00, 0.12, 880], [0.20, 0.12, 880], [0.40, 0.45, 1175]];
+      var total = Math.round(rate * 1.0);
+      var a = new Float32Array(total);
+      beats.forEach(function (b) {
+        var st = Math.round(b[0] * rate), len = Math.round(b[1] * rate);
+        for (var i = 0; i < len && st + i < total; i++) {
+          var env = Math.min(1, i / (rate * 0.01)) * Math.min(1, (len - i) / (rate * 0.03));
+          a[st + i] += Math.sin(2 * Math.PI * b[2] * (i / rate)) * 0.5 * env;
+        }
+      });
+      alarmUrl = wav(a, rate);
+
+      keep = new Audio(silenceUrl); keep.loop = true; keep.preload = "auto";
+      alarm = new Audio(alarmUrl); alarm.preload = "auto";
+      ready = true;
+    }
+
+    return {
+      /* 音は必ずタップの流れの中で初期化する。iOSはそれ以外の再生を拒否する */
+      arm: function () {
+        build();
+        if (!keep) return;
+        keep.play().then(function () { keep.pause(); keep.currentTime = 0; }).catch(function () {});
+      },
+      keepAlive: function (on) {
+        build();
+        if (!keep) return;
+        if (on) keep.play().catch(function () {});
+        else { keep.pause(); keep.currentTime = 0; }
+      },
+      alarm: function () {
+        build();
+        if (!alarm || !DB.settings.restSound) return;
+        try { alarm.currentTime = 0; } catch (e) {}
+        alarm.play().catch(function () {});
+      }
+    };
+  })();
+
+  var restEndsAt = 0, restTotal = 0, restTimer = null, restDone = false;
+  function restLeftSec() {
+    return restEndsAt ? Math.max(0, Math.ceil((restEndsAt - Date.now()) / 1000)) : 0;
+  }
+  function restActive() { return restEndsAt > 0; }
   function paintRest() {
-    document.getElementById("restT").textContent = mmss(Math.max(0, restLeft));
+    var left = restLeftSec();
+    document.getElementById("restT").textContent = mmss(left);
     document.getElementById("restFill").style.width =
-      (restTotal ? Math.max(0, restLeft) / restTotal * 100 : 0) + "%";
+      (restTotal ? left / restTotal * 100 : 0) + "%";
   }
   function startRest(sec) {
     if (!sec) return;
-    restLeft = sec; restTotal = sec;
+    restEndsAt = Date.now() + sec * 1000;
+    restTotal = sec;
+    restDone = false;
     document.getElementById("rest").style.display = "flex";
     paintRest();
+    Sound.keepAlive(true);
     clearInterval(restTimer);
-    restTimer = setInterval(function () {
-      restLeft--; paintRest();
-      if (restLeft <= 0) stopRest();
-    }, 1000);
+    restTimer = setInterval(tickRest, 250);
+  }
+  function tickRest() {
+    if (!restActive()) return;
+    paintRest();
+    if (restLeftSec() <= 0 && !restDone) {
+      restDone = true;
+      finishRest();
+    }
+  }
+  function finishRest() {
+    Sound.alarm();
+    if (navigator.vibrate) { try { navigator.vibrate([400, 150, 400]); } catch (e) {} }
+    notifyRestDone();
+    /* 音が鳴りきるまで少しだけ生かしてから止める */
+    setTimeout(function () { Sound.keepAlive(false); }, 1500);
+    setTimeout(stopRest, 2500);
   }
   function stopRest() {
-    clearInterval(restTimer); restLeft = 0;
+    clearInterval(restTimer);
+    restEndsAt = 0; restTotal = 0; restDone = false;
+    Sound.keepAlive(false);
     document.getElementById("rest").style.display = "none";
   }
+  function notifyRestDone() {
+    if (!DB.settings.restNotify) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    /* 画面を見ているときは音とバイブで足りる */
+    if (!document.hidden) return;
+    try {
+      new Notification("休憩おわり", {
+        body: "次のセットへ",
+        tag: "torelog-rest",
+        silent: false
+      });
+    } catch (e) {}
+  }
   document.getElementById("rest30").addEventListener("click", function () {
-    restLeft += 30; restTotal = Math.max(restTotal, restLeft); paintRest();
+    if (!restActive()) return;
+    restEndsAt += 30000;
+    restTotal = Math.max(restTotal, restLeftSec());
+    restDone = false;
+    paintRest();
   });
   document.getElementById("restSkip").addEventListener("click", stopRest);
+  /* 画面に戻ってきたら、経過ぶんを反映し直す */
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden && restActive()) tickRest();
+  });
 
   /* =========================================================
      8. 履歴
@@ -2355,6 +2474,31 @@
     p = group("データ", null, "v1は端末内に保存します。同期はv2で入れます");
     rowBtn(p, "バックアップと復元", DB.sessions.length + " 件のセッション", "", function () { push("data", null); });
     rowBtn(p, "Googleドライブ同期", driveStatusLine(), "", function () { push("sync", null); });
+
+    p = group("レストタイマー", null,
+      "画面を消していても時間が来たら音で知らせます。レスト中だけ無音を再生してページを生かす仕組みのため、レストが終われば止まります");
+    switchRow(p, "終了時に音を鳴らす", "端末がマナーモードだと鳴りません",
+      DB.settings.restSound, function () {
+        DB.settings.restSound = !DB.settings.restSound; save("settings"); render();
+      });
+    if (typeof Notification === "undefined") {
+      rowBtn(p, "通知", "この端末では使えません", "", null, true);
+    } else if (Notification.permission === "granted") {
+      switchRow(p, "通知も出す", "アプリを見ていないときだけ出ます",
+        DB.settings.restNotify, function () {
+          DB.settings.restNotify = !DB.settings.restNotify; save("settings"); render();
+        });
+    } else if (Notification.permission === "denied") {
+      rowBtn(p, "通知", "ブラウザ側で拒否されています。端末の設定から許可してください", "", null, true);
+    } else {
+      rowBtn(p, "通知を許可する", "レスト終了を通知でも知らせます", "", function () {
+        Notification.requestPermission().then(function (r) {
+          if (r === "granted") { DB.settings.restNotify = true; save("settings"); toast("通知を許可しました"); }
+          else toast("通知は許可されませんでした");
+          render();
+        });
+      });
+    }
 
     p = group("表示");
     var themes = [{ id: "system", label: "端末に合わせる" }, { id: "light", label: "ライト" }, { id: "dark", label: "ダーク" }];
