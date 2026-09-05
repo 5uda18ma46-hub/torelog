@@ -512,6 +512,7 @@
     <div class="rest-row">
       <div class="rest-left"><span class="rest-k">Rest</span><span class="rest-t" id="restT">0:00</span></div>
       <div style="display:flex;gap:8px;">
+        <button id="restPip">別画面</button>
         <button id="rest30">＋30秒</button>
         <button id="restSkip">スキップ</button>
       </div>
@@ -533,7 +534,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-08-16 #5";
+  var APP_VERSION = "2026-09-06 #6";
   var K = {
     meta: "wl:meta", settings: "wl:settings", exercises: "wl:exercises",
     programs: "wl:programs", sessions: "wl:sessions", active: "wl:active", bodyLogs: "wl:bodyLogs"
@@ -673,6 +674,8 @@
     theme: "system",
     startWeight: 59.0,
     restSound: true,
+    restVoice: true,
+    restPip: true,
     restNotify: false,
     /* Googleドライブ同期。clientId は Google Cloud で作った OAuth クライアントID。
        ブラウザアプリのクライアントIDは秘密情報ではないので、そのまま保存してよい */
@@ -1701,7 +1704,7 @@
         if (a === "log") {
           se.sets.push({ weight: v.w, reps: v.r, loggedAt: new Date().toISOString() });
           save("active");
-          startRest(se.snapshot.restSec);
+          startRest(se.snapshot.restSec, se.snapshot.name);
           if (seDone(se)) {
             var nxt = firstUndone(DB.active);
             S.openExIdx = nxt;
@@ -1793,7 +1796,7 @@
         時間が来たときに音を鳴らせる。レストが終われば無音再生も止める。 */
 
   var Sound = (function () {
-    var silenceUrl = null, alarmUrl = null, keep = null, alarm = null, ready = false;
+    var alarmUrl = null, alarm = null, ready = false;
 
     function wav(samples, rate) {
       var n = samples.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
@@ -1813,10 +1816,6 @@
     function build() {
       if (ready) return;
       var rate = 22050;
-      var sil = new Float32Array(rate); /* 1秒の無音 */
-      silenceUrl = wav(sil, rate);
-
-      /* ピッ・ピッ・ピーッ */
       var beats = [[0.00, 0.12, 880], [0.20, 0.12, 880], [0.40, 0.45, 1175]];
       var total = Math.round(rate * 1.0);
       var a = new Float32Array(total);
@@ -1828,35 +1827,146 @@
         }
       });
       alarmUrl = wav(a, rate);
-
-      keep = new Audio(silenceUrl); keep.loop = true; keep.preload = "auto";
-      alarm = new Audio(alarmUrl); alarm.preload = "auto";
+      alarm = new Audio(alarmUrl);
+      alarm.preload = "auto";
       ready = true;
     }
 
+    /* 音楽を止めずに一瞬だけ割り込む。カーナビの音声案内と同じ扱い。
+       "transient" は他のアプリの音を小さくするだけで、止めない */
+    function duck() {
+      try {
+        if (navigator.audioSession) navigator.audioSession.type = "transient";
+      } catch (e) {}
+    }
+
     return {
-      /* 音は必ずタップの流れの中で初期化する。iOSはそれ以外の再生を拒否する */
       arm: function () {
         build();
-        if (!keep) return;
-        keep.play().then(function () { keep.pause(); keep.currentTime = 0; }).catch(function () {});
-      },
-      keepAlive: function (on) {
-        build();
-        if (!keep) return;
-        if (on) keep.play().catch(function () {});
-        else { keep.pause(); keep.currentTime = 0; }
+        duck();
+        /* 音声合成もタップの流れの中で一度起こしておく */
+        try {
+          if (window.speechSynthesis) {
+            var u = new SpeechSynthesisUtterance(" ");
+            u.volume = 0; speechSynthesis.speak(u);
+          }
+        } catch (e) {}
       },
       alarm: function () {
         build();
         if (!alarm || !DB.settings.restSound) return;
+        duck();
         try { alarm.currentTime = 0; } catch (e) {}
         alarm.play().catch(function () {});
+      },
+      say: function (text) {
+        if (!DB.settings.restVoice) return;
+        if (!window.speechSynthesis) return;
+        duck();
+        try {
+          var u = new SpeechSynthesisUtterance(text);
+          u.lang = "ja-JP"; u.rate = 1.05; u.volume = 1;
+          speechSynthesis.speak(u);
+        } catch (e) {}
+      }
+    };
+  })();
+
+  /* --- ピクチャインピクチャ ---
+     レスト中にページを生かす手段でもある。
+     以前は無音の音声をループ再生していたが、それだと音楽やYouTubeの再生権を
+     奪ってしまい、音楽を再開するとタイマーが止まっていた。
+     映像だけのPiPなら音には触れないので、音楽を流したまま時間を進められる。 */
+  var PiP = (function () {
+    var canvas = null, ctx = null, video = null, drawTimer = null, on = false;
+
+    function build() {
+      if (canvas) return;
+      canvas = document.createElement("canvas");
+      canvas.width = 480; canvas.height = 270;
+      ctx = canvas.getContext("2d");
+      video = document.createElement("video");
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+      video.setAttribute("muted", "");
+      video.setAttribute("playsinline", "");
+      video.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;";
+      document.body.appendChild(video);
+    }
+
+    function draw() {
+      if (!ctx) return;
+      var left = restLeftSec();
+      var w = canvas.width, h = canvas.height;
+      ctx.fillStyle = "#0C100F"; ctx.fillRect(0, 0, w, h);
+
+      ctx.fillStyle = "#74817D";
+      ctx.font = "600 22px -apple-system, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("REST", 28, 46);
+
+      ctx.fillStyle = "#E9EEEC";
+      ctx.font = "700 26px -apple-system, sans-serif";
+      ctx.fillText(restLabel || "", 28, h - 30, w - 56);
+
+      ctx.fillStyle = left <= 15 ? "#40C1A7" : "#E9EEEC";
+      ctx.font = "700 108px -apple-system, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(mmss(left), w / 2, h / 2 + 24);
+
+      var pct = restTotal ? left / restTotal : 0;
+      ctx.fillStyle = "#2B3331";
+      ctx.fillRect(28, h - 70, w - 56, 6);
+      ctx.fillStyle = "#40C1A7";
+      ctx.fillRect(28, h - 70, (w - 56) * pct, 6);
+    }
+
+    return {
+      supported: function () {
+        build();
+        return !!(video.webkitSetPresentationMode || video.requestPictureInPicture);
+      },
+      active: function () { return on; },
+      /* タップの流れの中から呼ぶこと。iOSはそれ以外を拒否する */
+      start: function () {
+        build();
+        if (on) return Promise.resolve(true);
+        draw();
+        try {
+          if (!video.srcObject) video.srcObject = canvas.captureStream(8);
+        } catch (e) { return Promise.reject(e); }
+        clearInterval(drawTimer);
+        drawTimer = setInterval(draw, 250);
+        var go = video.play().catch(function () {});
+        return Promise.resolve(go).then(function () {
+          if (video.webkitSetPresentationMode) {
+            video.webkitSetPresentationMode("picture-in-picture");
+            on = true; return true;
+          }
+          if (video.requestPictureInPicture) {
+            return video.requestPictureInPicture().then(function () { on = true; return true; });
+          }
+          throw new Error("pip-unsupported");
+        });
+      },
+      stop: function () {
+        clearInterval(drawTimer); drawTimer = null;
+        if (!video) { on = false; return; }
+        try {
+          if (video.webkitSetPresentationMode) video.webkitSetPresentationMode("inline");
+          else if (document.pictureInPictureElement) document.exitPictureInPicture();
+        } catch (e) {}
+        try { video.pause(); } catch (e) {}
+        on = false;
       }
     };
   })();
 
   var restEndsAt = 0, restTotal = 0, restTimer = null, restDone = false;
+  var restLabel = "";
+  var restCued = {};
+
   function restLeftSec() {
     return restEndsAt ? Math.max(0, Math.ceil((restEndsAt - Date.now()) / 1000)) : 0;
   }
@@ -1867,50 +1977,61 @@
     document.getElementById("restFill").style.width =
       (restTotal ? left / restTotal * 100 : 0) + "%";
   }
-  function startRest(sec) {
+  function startRest(sec, label) {
     if (!sec) return;
     restEndsAt = Date.now() + sec * 1000;
     restTotal = sec;
     restDone = false;
+    restLabel = label || "";
+    restCued = {};
     document.getElementById("rest").style.display = "flex";
     paintRest();
-    Sound.keepAlive(true);
     clearInterval(restTimer);
     restTimer = setInterval(tickRest, 250);
+    /* PiPはタップの流れの中でしか開けないので、ここで開く */
+    if (DB.settings.restPip) {
+      PiP.start().catch(function () { /* 非対応の端末では黙って諦める */ });
+    }
+  }
+  /* イヤホンだけで分かるように、残り時間を読み上げる。
+     画面を見ていなくても次のセットの準備に入れる */
+  function restCue(left) {
+    if (left <= 0) return;
+    if (restTotal > 75 && left <= 60 && !restCued[60]) {
+      restCued[60] = true; Sound.say("残り1分");
+    } else if (left <= 15 && !restCued[15]) {
+      restCued[15] = true; Sound.say("残り15秒");
+    }
   }
   function tickRest() {
     if (!restActive()) return;
     paintRest();
-    if (restLeftSec() <= 0 && !restDone) {
+    var left = restLeftSec();
+    restCue(left);
+    if (left <= 0 && !restDone) {
       restDone = true;
       finishRest();
     }
   }
   function finishRest() {
     Sound.alarm();
+    Sound.say("レスト終了");
     if (navigator.vibrate) { try { navigator.vibrate([400, 150, 400]); } catch (e) {} }
     notifyRestDone();
-    /* 音が鳴りきるまで少しだけ生かしてから止める */
-    setTimeout(function () { Sound.keepAlive(false); }, 1500);
     setTimeout(stopRest, 2500);
   }
   function stopRest() {
     clearInterval(restTimer);
-    restEndsAt = 0; restTotal = 0; restDone = false;
-    Sound.keepAlive(false);
+    restEndsAt = 0; restTotal = 0; restDone = false; restCued = {};
+    PiP.stop();
     document.getElementById("rest").style.display = "none";
   }
   function notifyRestDone() {
     if (!DB.settings.restNotify) return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    /* 画面を見ているときは音とバイブで足りる */
     if (!document.hidden) return;
     try {
-      new Notification("休憩おわり", {
-        body: "次のセットへ",
-        tag: "torelog-rest",
-        silent: false
-      });
+      new Notification("休憩おわり", { body: "次のセットへ", tag: "torelog-rest", silent: false });
     } catch (e) {}
   }
   document.getElementById("rest30").addEventListener("click", function () {
@@ -1918,7 +2039,12 @@
     restEndsAt += 30000;
     restTotal = Math.max(restTotal, restLeftSec());
     restDone = false;
+    restCued = {};
     paintRest();
+  });
+  document.getElementById("restPip").addEventListener("click", function () {
+    if (PiP.active()) { PiP.stop(); return; }
+    PiP.start().catch(function () { toast("この端末では別画面表示に対応していません"); });
   });
   document.getElementById("restSkip").addEventListener("click", stopRest);
   /* 画面に戻ってきたら、経過ぶんを反映し直す */
@@ -2496,7 +2622,17 @@
     rowBtn(p, "Googleドライブ同期", driveStatusLine(), "", function () { push("sync", null); });
 
     p = group("レストタイマー", null,
-      "画面を消していても時間が来たら音で知らせます。レスト中だけ無音を再生してページを生かす仕組みのため、レストが終われば止まります");
+      "レスト中は別画面（ピクチャインピクチャ）でページを生かします。音には触れないので、音楽やYouTubeを流したままでも時間が進みます");
+    switchRow(p, "レスト中に別画面を出す", "残り時間が浮かんで見えます。ページを生かす役目も兼ねています",
+      DB.settings.restPip, function () {
+        DB.settings.restPip = !DB.settings.restPip; save("settings");
+        if (!DB.settings.restPip) PiP.stop();
+        render();
+      });
+    switchRow(p, "音声で残りを知らせる", "残り1分 / 残り15秒 / 終了。音楽は止まらず一瞬小さくなるだけです",
+      DB.settings.restVoice, function () {
+        DB.settings.restVoice = !DB.settings.restVoice; save("settings"); render();
+      });
     switchRow(p, "終了時に音を鳴らす", "端末がマナーモードだと鳴りません",
       DB.settings.restSound, function () {
         DB.settings.restSound = !DB.settings.restSound; save("settings"); render();
