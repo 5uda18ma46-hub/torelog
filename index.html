@@ -534,7 +534,55 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-09-06 #6";
+  var APP_VERSION = "2026-09-12 #7";
+
+  /* --- 開発用ログ ---
+     開発期間だけ、端末の中に操作と異常の履歴を残す。
+     「たまに読み上げない」のような再現しにくい不具合は、起きた瞬間の状況
+     （画面が裏に回っていたか、何秒遅れたか、どのAPIが失敗したか）が残っていないと
+     原因を特定できないため。サーバーには送らない。バックアップにも含めない。 */
+  var DevLog = (function () {
+    var KEY = "wl:devlog", SEEN = "wl:devlog:seen", MAX = 400, buf = null;
+    function off() {
+      return typeof DB !== "undefined" && DB.settings && DB.settings.devLog === false;
+    }
+    function load() {
+      if (buf) return buf;
+      try { buf = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { buf = []; }
+      return buf;
+    }
+    function persist() { try { localStorage.setItem(KEY, JSON.stringify(buf)); } catch (e) {} }
+    function add(level, type, msg, data) {
+      if (off()) return;
+      load();
+      buf.push({ t: new Date().toISOString(), v: APP_VERSION, level: level, type: type,
+        msg: msg, data: data || null, vis: document.hidden ? "hidden" : "visible" });
+      if (buf.length > MAX) buf.splice(0, buf.length - MAX);
+      persist();
+    }
+    return {
+      info: function (type, msg, data) { add("info", type, msg, data); },
+      warn: function (type, msg, data) { add("warn", type, msg, data); },
+      error: function (type, msg, data) { add("error", type, msg, data); },
+      all: function () { return load().slice(); },
+      issues: function () { return load().filter(function (e) { return e.level !== "info"; }); },
+      unseen: function () {
+        var seen = ""; try { seen = localStorage.getItem(SEEN) || ""; } catch (e) {}
+        return load().filter(function (e) { return e.level !== "info" && e.t > seen; }).length;
+      },
+      markSeen: function () { try { localStorage.setItem(SEEN, new Date().toISOString()); } catch (e) {} },
+      clear: function () { buf = []; persist(); }
+    };
+  })();
+  /* 想定外のエラーは自動で拾う */
+  window.addEventListener("error", function (e) {
+    DevLog.error("js-error", e.message || "不明なエラー",
+      { src: (e.filename || "").split("/").pop(), line: e.lineno, col: e.colno });
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e.reason;
+    DevLog.error("promise", (r && r.message) || String(r));
+  });
   var K = {
     meta: "wl:meta", settings: "wl:settings", exercises: "wl:exercises",
     programs: "wl:programs", sessions: "wl:sessions", active: "wl:active", bodyLogs: "wl:bodyLogs"
@@ -676,6 +724,9 @@
     restSound: true,
     restVoice: true,
     restPip: true,
+    restVoiceRate: 0.85,
+    keepAwake: true,
+    devLog: true,
     restNotify: false,
     /* Googleドライブ同期。clientId は Google Cloud で作った OAuth クライアントID。
        ブラウザアプリのクライアントIDは秘密情報ではないので、そのまま保存してよい */
@@ -1034,10 +1085,11 @@
       charts: [viewCharts, null], settings: [viewSettings, null],
       exerciseList: [viewExerciseList, null], exerciseEdit: [viewExerciseEdit, null],
       exerciseNew: [viewExerciseNew, null], programEdit: [viewProgramEdit, null],
-      data: [viewData, null], weightLog: [viewWeightLog, null], sync: [viewSync, null]
+      data: [viewData, null], weightLog: [viewWeightLog, null], sync: [viewSync, null], devlog: [viewDevLog, null]
     };
     (R[v.name] || R.home)[0](v.arg);
     renderTabs();
+    WakeLock.sync();
   }
 
   function nav(title, opts) {
@@ -1494,6 +1546,8 @@
     };
     DB.active = s;
     Sound.arm();
+    if (DB.settings.restPip && PiP.supported()) PiP.prepare();
+    DevLog.info("session", "トレーニング開始 " + prog.label + (date !== today ? "（" + date + " の分）" : ""));
     S.pendingProgram = null;
     S.openExIdx = 0;
     save("active");
@@ -1509,6 +1563,7 @@
   function seDone(se) { return se.skipped || se.sets.length >= se.plannedSets; }
 
   function viewSession() {
+    if (DB.active && DB.settings.restPip && PiP.supported()) PiP.prepare();
     var s = DB.active;
     if (!s) { pop(); return; }
     var prog = s.programId ? progById(s.programId) : null;
@@ -1782,6 +1837,7 @@
     save("sessions"); save("active");
     stopRest();
     toast("記録しました（" + fmtInt(sessionVolume(s)) + "kg）");
+    DevLog.info("session", "トレーニング終了", { sets: sessionSetCount(s), volume: Math.round(sessionVolume(s)) });
     driveAutoUpload();
     S.stack = []; S.tab = "home"; render();
   }
@@ -1861,13 +1917,30 @@
       },
       say: function (text) {
         if (!DB.settings.restVoice) return;
-        if (!window.speechSynthesis) return;
+        if (!window.speechSynthesis) { DevLog.warn("speech", "この端末は読み上げに非対応"); return; }
         duck();
         try {
+          /* iOSは一度裏に回ると、読み上げが詰まったまま止まることがある。
+             詰まっていたら取り消してから話させる */
+          if (speechSynthesis.paused) speechSynthesis.resume();
+          if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
           var u = new SpeechSynthesisUtterance(text);
-          u.lang = "ja-JP"; u.rate = 1.05; u.volume = 1;
+          u.lang = "ja-JP";
+          u.rate = DB.settings.restVoiceRate || 0.85;
+          u.volume = 1;
+          var started = false;
+          u.onstart = function () { started = true; };
+          u.onerror = function (ev) {
+            DevLog.error("speech", "読み上げ失敗: " + text, { error: ev && ev.error });
+          };
           speechSynthesis.speak(u);
-        } catch (e) {}
+          DevLog.info("speech", "読み上げ: " + text);
+          setTimeout(function () {
+            if (!started) DevLog.warn("speech", "読み上げが始まらなかった: " + text,
+              { speaking: speechSynthesis.speaking, pending: speechSynthesis.pending,
+                paused: speechSynthesis.paused });
+          }, 3000);
+        } catch (e) { DevLog.error("speech", e.message); }
       }
     };
   })();
@@ -1878,7 +1951,7 @@
      奪ってしまい、音楽を再開するとタイマーが止まっていた。
      映像だけのPiPなら音には触れないので、音楽を流したまま時間を進められる。 */
   var PiP = (function () {
-    var canvas = null, ctx = null, video = null, drawTimer = null, on = false;
+    var canvas = null, ctx = null, video = null, drawTimer = null, on = false, prepared = false;
 
     function build() {
       if (canvas) return;
@@ -1891,7 +1964,8 @@
       video.playsInline = true;
       video.setAttribute("muted", "");
       video.setAttribute("playsinline", "");
-      video.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;";
+      /* 画面外に置くとiOSが別画面を拒否することがあるので、画面内に極小で置く */
+      video.style.cssText = "position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0.01;pointer-events:none;";
       document.body.appendChild(video);
     }
 
@@ -1922,32 +1996,89 @@
       ctx.fillRect(28, h - 70, (w - 56) * pct, 6);
     }
 
+    /* 映像の読み込みには時間がかかる。レスト開始のタップで一から作ると
+       「読み込みが終わっていない」で拒否され、読み込みを待つとタップの流れが切れて拒否される。
+       なので、セッションを開いた時点で先に作って再生しておく */
+    function prepare() {
+      build();
+      if (prepared) return;
+      try {
+        draw();
+        if (!video.srcObject) video.srcObject = canvas.captureStream(8);
+        var pl = video.play();
+        if (pl && pl.catch) pl.catch(function (e) { DevLog.warn("pip", "下準備の再生に失敗: " + e.message); });
+        prepared = true;
+        DevLog.info("pip", "別画面の下準備をした");
+      } catch (e) { DevLog.error("pip", "下準備に失敗: " + e.message, diag()); }
+    }
+
+    function diag() {
+      return {
+        homeScreen: !!navigator.standalone,
+        webkitApi: !!(video && video.webkitSetPresentationMode),
+        webkitSupportsPip: !!(video && video.webkitSupportsPresentationMode &&
+          video.webkitSupportsPresentationMode("picture-in-picture")),
+        standardApi: !!document.pictureInPictureEnabled,
+        readyState: video ? video.readyState : null,
+        size: video ? (video.videoWidth + "x" + video.videoHeight) : null,
+        mode: video ? (video.webkitPresentationMode || null) : null
+      };
+    }
+
     return {
+      diag: function () { build(); return diag(); },
+      prepare: prepare,
       supported: function () {
         build();
-        return !!(video.webkitSetPresentationMode || video.requestPictureInPicture);
+        if (video.webkitSupportsPresentationMode) {
+          return video.webkitSupportsPresentationMode("picture-in-picture");
+        }
+        return !!(document.pictureInPictureEnabled && video.requestPictureInPicture);
       },
       active: function () { return on; },
       /* タップの流れの中から呼ぶこと。iOSはそれ以外を拒否する */
       start: function () {
         build();
         if (on) return Promise.resolve(true);
+        DevLog.info("pip", "別画面を開こうとした", diag());
+        prepare();
         draw();
-        try {
-          if (!video.srcObject) video.srcObject = canvas.captureStream(8);
-        } catch (e) { return Promise.reject(e); }
         clearInterval(drawTimer);
         drawTimer = setInterval(draw, 250);
-        var go = video.play().catch(function () {});
-        return Promise.resolve(go).then(function () {
-          if (video.webkitSetPresentationMode) {
+        if (video.paused) {
+          var pl = video.play();
+          if (pl && pl.catch) pl.catch(function (e) { DevLog.error("pip", "映像の再生に失敗: " + e.message); });
+        }
+        if (video.readyState < 1) DevLog.warn("pip", "映像の読み込みが間に合っていない", diag());
+        /* 以前は play() の完了を待ってから別画面を頼んでいたが、
+           待っている間にタップの流れが切れ、iOSに拒否されていた。同じ流れで頼む */
+        try {
+          if (video.webkitSupportsPresentationMode &&
+              video.webkitSupportsPresentationMode("picture-in-picture")) {
             video.webkitSetPresentationMode("picture-in-picture");
-            on = true; return true;
+          } else if (document.pictureInPictureEnabled && video.requestPictureInPicture) {
+            return video.requestPictureInPicture().then(function () {
+              on = true; DevLog.info("pip", "別画面に入った"); return true;
+            }).catch(function (e) {
+              DevLog.error("pip", "別画面を拒否された: " + e.message, diag()); throw e;
+            });
+          } else {
+            DevLog.warn("pip", "この端末は別画面に非対応", diag());
+            return Promise.reject(new Error("pip-unsupported"));
           }
-          if (video.requestPictureInPicture) {
-            return video.requestPictureInPicture().then(function () { on = true; return true; });
-          }
-          throw new Error("pip-unsupported");
+        } catch (e) {
+          DevLog.error("pip", "別画面の命令で例外: " + e.message, diag());
+          return Promise.reject(e);
+        }
+        return new Promise(function (res, rej) {
+          setTimeout(function () {
+            if (video.webkitPresentationMode === "picture-in-picture") {
+              on = true; DevLog.info("pip", "別画面に入った"); res(true);
+            } else {
+              DevLog.error("pip", "別画面に切り替わらなかった", diag());
+              rej(new Error("pip-refused"));
+            }
+          }, 800);
         });
       },
       stop: function () {
@@ -1957,8 +2088,40 @@
           if (video.webkitSetPresentationMode) video.webkitSetPresentationMode("inline");
           else if (document.pictureInPictureElement) document.exitPictureInPicture();
         } catch (e) {}
-        try { video.pause(); } catch (e) {}
         on = false;
+      }
+    };
+  })();
+
+  /* --- 画面を点けたままにする ---
+     iOSのWebアプリは、裏に回ったり画面が消えたりすると数秒でタイマーも読み上げも止まる。
+     音で生かすと音楽を止めてしまい、別画面（PiP）はiPhoneで効かなかった。
+     残る確実な手は「トレーニング中は画面を消させない」こと。音楽には触れない */
+  var WakeLock = (function () {
+    var lock = null, pending = false, failed = false;
+    function supported() { return !!(navigator.wakeLock && navigator.wakeLock.request); }
+    function acquire() {
+      if (!supported() || lock || pending || failed || document.hidden) return;
+      pending = true;
+      navigator.wakeLock.request("screen").then(function (l) {
+        pending = false; lock = l;
+        DevLog.info("wakelock", "画面を点けたままにした");
+        l.addEventListener("release", function () { lock = null; DevLog.info("wakelock", "解除された"); });
+      }).catch(function (e) {
+        pending = false; failed = true;
+        DevLog.warn("wakelock", "画面を点けたままにできなかった: " + e.message);
+      });
+    }
+    function release() {
+      if (!lock) return;
+      try { lock.release(); } catch (e) {}
+      lock = null;
+    }
+    return {
+      supported: supported,
+      reset: function () { failed = false; },
+      sync: function () {
+        if (DB.active && DB.settings.keepAwake) acquire(); else release();
       }
     };
   })();
@@ -1988,20 +2151,29 @@
     paintRest();
     clearInterval(restTimer);
     restTimer = setInterval(tickRest, 250);
+    DevLog.info("rest", "レスト開始 " + sec + "秒 " + restLabel);
     /* PiPはタップの流れの中でしか開けないので、ここで開く */
-    if (DB.settings.restPip) {
-      PiP.start().catch(function () { /* 非対応の端末では黙って諦める */ });
+    if (DB.settings.restPip && PiP.supported()) {
+      PiP.start().catch(function () { /* 失敗理由はPiP側でログに残している */ });
     }
   }
   /* イヤホンだけで分かるように、残り時間を読み上げる。
      画面を見ていなくても次のセットの準備に入れる */
+  var CUES = [[60, "残り1分"], [15, "残り15秒"]];
   function restCue(left) {
     if (left <= 0) return;
-    if (restTotal > 75 && left <= 60 && !restCued[60]) {
-      restCued[60] = true; Sound.say("残り1分");
-    } else if (left <= 15 && !restCued[15]) {
-      restCued[15] = true; Sound.say("残り15秒");
-    }
+    CUES.forEach(function (c) {
+      var at = c[0];
+      if (at === 60 && restTotal <= 75) return;
+      if (restCued[at] || left > at) return;
+      restCued[at] = true;
+      /* 裏から戻ってきたときに、とっくに過ぎた案内を今さら読み上げない。
+         残り40秒で「残り1分」と聞こえると、かえって判断を誤る */
+      var delay = at - left;
+      if (delay <= 5) Sound.say(c[1]);
+      else DevLog.warn("cue-missed", c[1] + " を読み上げ損ねた（" + delay + "秒 遅れ）",
+        { left: left });
+    });
   }
   function tickRest() {
     if (!restActive()) return;
@@ -2014,9 +2186,16 @@
     }
   }
   function finishRest() {
-    Sound.alarm();
-    Sound.say("レスト終了");
-    if (navigator.vibrate) { try { navigator.vibrate([400, 150, 400]); } catch (e) {} }
+    var late = Math.round((Date.now() - restEndsAt) / 1000);
+    if (late > 5) {
+      /* 裏に回っていて気づくのが遅れた。今さら鳴らしても意味がないので黙る */
+      DevLog.warn("rest-late", "レスト終了に " + late + "秒 遅れて気づいた", { late: late });
+    } else {
+      Sound.alarm();
+      Sound.say("レスト終了");
+      if (navigator.vibrate) { try { navigator.vibrate([400, 150, 400]); } catch (e) {} }
+    }
+    DevLog.info("rest", "レスト終了", { late: late });
     notifyRestDone();
     setTimeout(stopRest, 2500);
   }
@@ -2044,12 +2223,30 @@
   });
   document.getElementById("restPip").addEventListener("click", function () {
     if (PiP.active()) { PiP.stop(); return; }
-    PiP.start().catch(function () { toast("この端末では別画面表示に対応していません"); });
+    PiP.start().catch(function () {
+      toast("別画面を開けませんでした。設定 → 開発用ログ に理由が残っています");
+    });
   });
   document.getElementById("restSkip").addEventListener("click", stopRest);
-  /* 画面に戻ってきたら、経過ぶんを反映し直す */
   document.addEventListener("visibilitychange", function () {
-    if (!document.hidden && restActive()) tickRest();
+    var info = { rest: restActive() ? restLeftSec() : null, session: !!DB.active };
+    if (document.hidden) {
+      DevLog.info("visibility", "アプリが裏に回った", info);
+      if (restActive()) DevLog.warn("rest-hidden",
+        "レスト中にアプリが裏に回った（この間iOSはタイマーと読み上げを止める）", info);
+      return;
+    }
+    DevLog.info("visibility", "前面に戻った", info);
+    /* 裏に回った後は読み上げが詰まっていることがあるので、ここでほどく */
+    try {
+      if (window.speechSynthesis && (speechSynthesis.speaking || speechSynthesis.pending || speechSynthesis.paused)) {
+        speechSynthesis.cancel();
+        DevLog.info("speech", "詰まっていた読み上げを解除した");
+      }
+    } catch (e) {}
+    WakeLock.reset();
+    WakeLock.sync();
+    if (restActive()) tickRest();
   });
 
   /* =========================================================
@@ -2622,17 +2819,38 @@
     rowBtn(p, "Googleドライブ同期", driveStatusLine(), "", function () { push("sync", null); });
 
     p = group("レストタイマー", null,
-      "レスト中は別画面（ピクチャインピクチャ）でページを生かします。音には触れないので、音楽やYouTubeを流したままでも時間が進みます");
-    switchRow(p, "レスト中に別画面を出す", "残り時間が浮かんで見えます。ページを生かす役目も兼ねています",
-      DB.settings.restPip, function () {
-        DB.settings.restPip = !DB.settings.restPip; save("settings");
-        if (!DB.settings.restPip) PiP.stop();
-        render();
-      });
+      "読み上げはトレログを開いている間だけ動きます。iPhoneはWebアプリが裏に回ると数秒で止めるためです。" +
+      "音楽は他のアプリで流したままで大丈夫です");
+    if (WakeLock.supported()) {
+      switchRow(p, "トレーニング中は画面を消さない", "開いたまま置いておけば、見なくても読み上げが届きます",
+        DB.settings.keepAwake, function () {
+          DB.settings.keepAwake = !DB.settings.keepAwake; save("settings"); render();
+        });
+    } else {
+      rowBtn(p, "画面を消さない", "この端末では使えません", "", null, true);
+    }
     switchRow(p, "音声で残りを知らせる", "残り1分 / 残り15秒 / 終了。音楽は止まらず一瞬小さくなるだけです",
       DB.settings.restVoice, function () {
         DB.settings.restVoice = !DB.settings.restVoice; save("settings"); render();
       });
+    if (DB.settings.restVoice) {
+      chipRow(p, [{ id: "0.7", label: "かなりゆっくり" }, { id: "0.85", label: "ゆっくり" },
+        { id: "1", label: "ふつう" }], String(DB.settings.restVoiceRate || 0.85), function (id) {
+        DB.settings.restVoiceRate = Number(id); save("settings");
+        Sound.arm(); Sound.say("残り1分");
+        render();
+      });
+    }
+    if (PiP.supported()) {
+      switchRow(p, "レスト中に別画面を出す", "残り時間が浮かんで見えます",
+        DB.settings.restPip, function () {
+          DB.settings.restPip = !DB.settings.restPip; save("settings");
+          if (!DB.settings.restPip) PiP.stop();
+          render();
+        });
+    } else {
+      rowBtn(p, "別画面（ピクチャインピクチャ）", "この端末・この開き方では使えません", "", null, true);
+    }
     switchRow(p, "終了時に音を鳴らす", "端末がマナーモードだと鳴りません",
       DB.settings.restSound, function () {
         DB.settings.restSound = !DB.settings.restSound; save("settings"); render();
@@ -2678,9 +2896,83 @@
       location.replace(location.pathname + "?v=" + Date.now());
     });
     p.appendChild(up2);
+    var nIssue = DevLog.issues().length, nNew = DevLog.unseen();
+    rowBtn(p, "開発用ログ",
+      nIssue ? "問題 " + nIssue + " 件" + (nNew ? "（未確認 " + nNew + "）" : "") : "問題は記録されていません",
+      nNew ? '<span class="pr" style="background:var(--warn)">' + nNew + "</span>" : "",
+      function () { push("devlog", null); });
 
     appEl.appendChild(el("div", "hint",
       "最終更新 " + new Date(DB.meta.updatedAt).toLocaleString("ja-JP")));
+  }
+
+  function viewDevLog() {
+    nav("開発用ログ");
+    DevLog.markSeen();
+    var all = DevLog.all(), issues = DevLog.issues();
+
+    var t = el("div", "tiles");
+    t.innerHTML =
+      '<div class="tile"><span class="k">記録</span><span class="v">' + all.length + "<small>件</small></span></div>" +
+      '<div class="tile"><span class="k">問題</span><span class="v">' + issues.length + "<small>件</small></span></div>" +
+      '<div class="tile"><span class="k">開き方</span><span class="v" style="font-size:14px">' +
+      (navigator.standalone ? "ホーム画面" : "Safari") + "</span></div>";
+    appEl.appendChild(t);
+
+    var p = group("記録する");
+    switchRow(p, "開発用ログを残す", "端末の中だけに保存。サーバーには送りません",
+      DB.settings.devLog !== false, function () {
+        DB.settings.devLog = DB.settings.devLog === false; save("settings"); render();
+      });
+
+    var btns = el("div", "rowbtns");
+    var copy = el("button", "ghost", "全部コピー");
+    copy.addEventListener("click", function () {
+      var head = "ToreLog " + APP_VERSION + " / " + navigator.userAgent +
+        " / " + (navigator.standalone ? "home-screen" : "safari") + "\n";
+      var text = head + all.map(function (e) {
+        return e.t + " [" + e.level + "] " + e.type + " (" + e.vis + ") " + e.msg +
+          (e.data ? " " + JSON.stringify(e.data) : "");
+      }).join("\n");
+      var done = function () { toast("コピーしました。チャットに貼ってください"); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () { toast("コピーできませんでした"); });
+      } else {
+        var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta);
+        ta.select(); try { document.execCommand("copy"); done(); } catch (e) {} ta.remove();
+      }
+    });
+    var onlyIssues = el("button", "ghost", S.devlogAll ? "問題だけ表示" : "すべて表示");
+    onlyIssues.addEventListener("click", function () { S.devlogAll = !S.devlogAll; render(); });
+    var clr = el("button", "ghost", "消去");
+    clr.addEventListener("click", function () {
+      if (!confirm("開発用ログを消去します。")) return;
+      DevLog.clear(); render();
+    });
+    btns.appendChild(copy); btns.appendChild(onlyIssues); btns.appendChild(clr);
+    appEl.appendChild(btns);
+
+    var list = (S.devlogAll ? all : issues).slice().reverse().slice(0, 200);
+    var g = group(S.devlogAll ? "すべての記録（新しい順）" : "問題だけ（新しい順）");
+    if (!list.length) {
+      g.appendChild(el("div", "empty", S.devlogAll ? "まだ記録がありません" : "問題は記録されていません"));
+      return;
+    }
+    list.forEach(function (e) {
+      var color = e.level === "error" ? "var(--warn)" : e.level === "warn" ? "#C9A227" : "var(--ink-3)";
+      var d = new Date(e.t);
+      var row = el("div", "exline");
+      row.innerHTML =
+        '<div class="h" style="gap:8px"><span style="font-size:11px;font-weight:700;color:' + color + '">' +
+        e.level.toUpperCase() + "</span>" +
+        '<span style="font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums">' +
+        (d.getMonth() + 1) + "/" + d.getDate() + " " + d.toLocaleTimeString("ja-JP") +
+        " ・ " + esc(e.type) + (e.vis === "hidden" ? " ・ 裏" : "") + "</span></div>" +
+        '<div style="font-size:13px">' + esc(e.msg) + "</div>" +
+        (e.data ? '<div style="font-size:11px;color:var(--ink-3);word-break:break-all;font-family:ui-monospace,Menlo,monospace">' +
+          esc(JSON.stringify(e.data)) + "</div>" : "");
+      g.appendChild(row);
+    });
   }
 
   function viewExerciseList(opt) {
@@ -3569,6 +3861,14 @@
   load();
   applyTheme();
   render();
+  DevLog.info("boot", "起動", {
+    ua: navigator.userAgent,
+    homeScreen: !!navigator.standalone,
+    speech: !!window.speechSynthesis,
+    audioSession: !!navigator.audioSession,
+    wakeLock: WakeLock.supported(),
+    pip: PiP.supported()
+  });
 
   /* 経過時間の更新 */
   setInterval(function () {
