@@ -534,7 +534,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-09-12 #7";
+  var APP_VERSION = "2026-09-16 #8";
 
   /* --- 開発用ログ ---
      開発期間だけ、端末の中に操作と異常の履歴を残す。
@@ -2804,6 +2804,27 @@
     });
     p.appendChild(addProg);
 
+    /* ローテーションから外したメニュー。取り込みで外すこともあるので、戻せるようにしておく */
+    var retired = DB.programs.filter(function (x) { return x.archived; });
+    if (retired.length) {
+      var rp = group("使わなくなったメニュー", null, "過去の記録には残っています。戻すとホームのローテーションに入ります");
+      retired.forEach(function (pr) {
+        var row = el("div", "row");
+        row.innerHTML = '<span class="main"><span class="t">' + esc(pr.label) + '</span>' +
+          '<span class="s">' + pr.items.length + " 種目 ・ 記録 " +
+          DB.sessions.filter(function (x) { return x.programId === pr.id; }).length + " 回</span></span>";
+        var back = el("button", "ghost", "戻す");
+        back.style.flex = "none"; back.style.padding = "6px 14px";
+        back.addEventListener("click", function () {
+          pr.archived = false; save("programs");
+          DevLog.info("program", "メニューを戻した: " + pr.label);
+          toast(pr.label + " を戻しました"); render();
+        });
+        row.appendChild(back);
+        rp.appendChild(row);
+      });
+    }
+
     p = group("種目", null, "セッション画面の刻み・レスト・レップ範囲は、すべてここの設定を読みます");
     rowBtn(p, "種目マスタ",
       DB.exercises.filter(function (e) { return !e.archived; }).length + " 種目を登録済み",
@@ -3336,7 +3357,8 @@
 
     var p2 = group("読み込み", null,
       "バックアップ全体のJSONなら、今のデータを上書きして復元します。" +
-      "1回分だけの記録（workout-log-session 形式）なら、今のデータを残したまま追加します");
+      "1回分だけの記録（workout-log-session 形式）なら、今のデータを残したまま追加します。" +
+      "メニューだけ（workout-log-programs 形式）なら、記録には触れずにメニューを更新します");
     var ta2 = el("textarea", "json");
     ta2.placeholder = "ここにJSONを貼り付ける";
     var w2 = el("div", "row"); w2.style.display = "block"; w2.appendChild(ta2);
@@ -3372,6 +3394,63 @@
      全体を上書きするバックアップと違い、今のデータを壊さずに済む。
      セットは [重量, 回数] の配列で受け取り、種目の設定（部位・レップ範囲・レスト）は
      取り込む時点の種目マスタから作る。 */
+  /* メニュー（プログラム）だけを入れ替える形式。
+     パーソナルトレーニング側でメニューを組み直したときに使う。
+     記録（セッション）と種目マスタには触れないので、スマホで記録した分が消えない。
+     - programs: 同じidがあれば中身を置き換え、なければ追加
+     - archive:  指定したidをローテーションから外す（記録は残る）
+     - settings: 開始体重など、許可した項目だけ上書き */
+  var PROGRAM_IMPORT_SETTINGS = ["startWeight", "weeklyTarget"];
+
+  function importPrograms(d) {
+    var progs = d.programs || [], arch = d.archive || [], patch = d.settings || {};
+    var unknown = [];
+    progs.forEach(function (pr) {
+      (pr.items || []).forEach(function (it) {
+        if (!exById(it.exerciseId) && unknown.indexOf(it.exerciseId) < 0) unknown.push(it.exerciseId);
+      });
+    });
+    if (unknown.length) { toast("知らない種目があります: " + unknown.join(", ")); return false; }
+
+    var added = [], updated = [], archived = [], setting = [];
+    progs.forEach(function (pr) { (progById(pr.id) ? updated : added).push(pr.label); });
+    arch.forEach(function (id) {
+      var p0 = progById(id);
+      if (p0 && !p0.archived) archived.push(p0.label);
+    });
+    PROGRAM_IMPORT_SETTINGS.forEach(function (k) {
+      if (patch[k] !== undefined && patch[k] !== DB.settings[k]) setting.push(k + ": " + DB.settings[k] + " → " + patch[k]);
+    });
+
+    var lines = [];
+    if (added.length) lines.push("追加: " + added.join(" / "));
+    if (updated.length) lines.push("中身を置き換え: " + updated.join(" / "));
+    if (archived.length) lines.push("ホームのローテーションから外す（記録は残ります）: " + archived.join(" / "));
+    if (setting.length) lines.push("設定: " + setting.join(" / "));
+    if (!lines.length) { toast("変更点はありませんでした"); return false; }
+    if (!confirm("メニューを更新します。記録は変わりません。\n\n" + lines.join("\n"))) return false;
+
+    progs.forEach(function (pr) {
+      var clean = {
+        id: pr.id, label: pr.label, archived: false,
+        items: (pr.items || []).map(function (it) {
+          return { exerciseId: it.exerciseId, targetSets: Number(it.targetSets) || 3 };
+        })
+      };
+      var cur = progById(pr.id);
+      if (cur) { cur.label = clean.label; cur.items = clean.items; cur.archived = false; }
+      else DB.programs.push(clean);
+    });
+    arch.forEach(function (id) { var p0 = progById(id); if (p0) p0.archived = true; });
+    PROGRAM_IMPORT_SETTINGS.forEach(function (k) { if (patch[k] !== undefined) DB.settings[k] = patch[k]; });
+    save("programs"); save("settings");
+    S.pendingProgram = null;
+    DevLog.info("import", "メニューを取り込んだ", { added: added, updated: updated, archived: archived, settings: setting });
+    S.stack = []; S.tab = "settings"; render();
+    toast("メニューを更新しました");
+    return true;
+  }
+
   function importSession(d) {
     if (!d.date || !d.exercises || !d.exercises.length) { toast("記録の中身がありません"); return false; }
     var dup = DB.sessions.filter(function (x) { return x.date === d.date; });
@@ -3418,6 +3497,7 @@
     var d;
     try { d = JSON.parse(text); } catch (e) { toast("JSONとして読めませんでした"); return false; }
     if (d.app === "workout-log-session") return importSession(d);
+    if (d.app === "workout-log-programs") return importPrograms(d);
     if (d.app !== "workout-log") { toast("このアプリのバックアップではありません"); return false; }
     if (d.schemaVersion > SCHEMA) { toast("新しいバージョンのデータです。アプリを更新してください"); return false; }
     if (!skipConfirm && !confirm("今のデータを上書きします。よろしいですか？")) return false;
