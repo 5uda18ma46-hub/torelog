@@ -534,7 +534,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-09-16 #8";
+  var APP_VERSION = "2026-09-16 #9";
 
   /* --- 開発用ログ ---
      開発期間だけ、端末の中に操作と異常の履歴を残す。
@@ -1183,9 +1183,22 @@
     return DB.programs.filter(function (p) { return !p.archived; });
   }
   /* 直近に実施したプログラムの「次」を順番に回す。プログラムが3つ以上でも成立する */
+  /* 土日は休日、それ以外は平日。祝日は判定しない（カレンダーの保守が要るため）。
+     祝日に休日メニューをやりたい日は、ホームの切り替えで選ぶ */
+  function dayType(d) {
+    var g = (d || new Date()).getDay();
+    return g === 0 || g === 6 ? "weekend" : "weekday";
+  }
+  var DAY_LABEL = { weekday: "平日", weekend: "休日" };
+
+  /* 今日の曜日に合うメニューを優先する。
+     合うメニューが複数あればその中で順番に回し、1つもなければ全メニューを順番に回す */
   function nextProgram() {
-    var list = activePrograms();
-    if (!list.length) return null;
+    var all = activePrograms();
+    if (!all.length) return null;
+    var today = dayType();
+    var typed = all.filter(function (p) { return p.days === today; });
+    var list = typed.length ? typed : all;
     var done = doneSessions();
     for (var i = 0; i < done.length; i++) {
       if (!done[i].programId) continue;
@@ -1205,6 +1218,20 @@
 
   function viewHome() {
     nav("今日", { plain: true, sub: "今週 " + weekCount() + " / " + DB.settings.weeklyTarget + " 回" });
+
+    if (S.patchNotes && S.patchNotes.length) {
+      var pn = el("div", "card");
+      pn.style.background = "var(--accent-soft)";
+      pn.style.borderColor = "transparent";
+      pn.innerHTML = '<div style="font-size:13.5px;line-height:1.6">' +
+        S.patchNotes.map(esc).join("<br>") +
+        '<br><span style="color:var(--ink-2);font-size:12px">旧Day A / Day B は設定の「使わなくなったメニュー」から戻せます</span></div>';
+      var ok = el("button", "ghost", "OK");
+      ok.style.flex = "none";
+      ok.addEventListener("click", function () { S.patchNotes = null; render(); });
+      pn.appendChild(ok);
+      appEl.appendChild(pn);
+    }
 
     if (!storageOK) {
       appEl.appendChild(el("div", "card",
@@ -1248,7 +1275,10 @@
           '<div class="day">' + esc(parts[0]) + "<span>" + esc(parts[1] || "") + "</span></div></div>" +
           '<div class="next-meta">' +
           (days !== null ? "<span>前回から <b>" + days + "日</b></span>" : "<span>初回</span>") +
-          "<span><b>" + prog.items.length + "</b> 種目</span></div>";
+          "<span><b>" + prog.items.length + "</b> 種目</span>" +
+          (prog.days && !S.pendingProgram && prog.days === dayType()
+            ? "<span>今日は" + DAY_LABEL[prog.days] + "のメニュー</span>" : "") +
+          "</div>";
         var start = el("button", "primary big", "始める");
         start.addEventListener("click", function () { startSession(prog.id); });
         c.appendChild(start);
@@ -2790,7 +2820,8 @@
     nav("設定", { plain: true });
     var p = group("プログラム", null, "ホームでは、この順番どおりに次のメニューが回ります");
     activePrograms().forEach(function (pr) {
-      rowBtn(p, esc(pr.label), pr.items.length + " 種目", "", function () { push("programEdit", pr.id); });
+      rowBtn(p, esc(pr.label), pr.items.length + " 種目" + (pr.days ? " ・ " + DAY_LABEL[pr.days] + "に使う" : ""),
+        "", function () { push("programEdit", pr.id); });
     });
     var addProg = el("button", "row");
     addProg.style.color = "var(--accent)";
@@ -3251,6 +3282,14 @@
     });
     nr.appendChild(ni); np.appendChild(nr);
 
+    var dp = group("使う日", null,
+      "ホームの「次のトレーニング」が、今日の曜日に合うメニューを優先して出します（土日が休日）");
+    chipRow(dp, [{ id: "", label: "指定なし" }, { id: "weekday", label: "平日" }, { id: "weekend", label: "休日" }],
+      prog.days || "", function (id) {
+        prog.days = id || null; save("programs");
+        S.pendingProgram = null; render();
+      });
+
     var p = group("種目の順番とセット数", null,
       "セッション画面はこの順番で始まります。当日その場で入れ替えることもできます");
     prog.items.forEach(function (it, idx) {
@@ -3432,13 +3471,13 @@
 
     progs.forEach(function (pr) {
       var clean = {
-        id: pr.id, label: pr.label, archived: false,
+        id: pr.id, label: pr.label, archived: false, days: pr.days || null,
         items: (pr.items || []).map(function (it) {
           return { exerciseId: it.exerciseId, targetSets: Number(it.targetSets) || 3 };
         })
       };
       var cur = progById(pr.id);
-      if (cur) { cur.label = clean.label; cur.items = clean.items; cur.archived = false; }
+      if (cur) { cur.label = clean.label; cur.items = clean.items; cur.archived = false; cur.days = clean.days; }
       else DB.programs.push(clean);
     });
     arch.forEach(function (id) { var p0 = progById(id); if (p0) p0.archived = true; });
@@ -3508,6 +3547,7 @@
     DB.bodyLogs = d.bodyLogs || [];
     DB.active = null;
     ["settings", "exercises", "programs", "sessions", "bodyLogs", "active"].forEach(save);
+    applyDataPatches();
     S.stack = []; S.tab = "home"; render();
     toast("取り込みました");
     return true;
@@ -3938,7 +3978,78 @@
     _viewExerciseList(opt);
   };
 
+  /* --- データの自動移行 ---
+     スマホのデータはスマホの中にしかないので、メニューの改定は
+     「アプリが次に起動したときに自分で適用する」形で届ける。手で取り込ませない。
+     条件はフラグではなくデータの状態で判定する。古いバックアップを復元して
+     新メニューが消えた場合にも、次の起動で自動的に戻るようにするため */
+  var DATA_PATCHES = [
+    {
+      id: "2026-09-16-menu",
+      note: "メニューを新しいプログラム（平日A / 休日B）に切り替えました",
+      needed: function () { return !progById("prog_c") && !progById("prog_d"); },
+      apply: function () {
+        DB.programs.push({ id: "prog_c", label: "平日A・上半身（45分）", archived: false, days: "weekday", items: [
+          { exerciseId: "ex_bench_press", targetSets: 4 },
+          { exerciseId: "ex_weighted_pullup", targetSets: 4 },
+          { exerciseId: "ex_incline_db_press", targetSets: 3 },
+          { exerciseId: "ex_seated_row", targetSets: 3 },
+          { exerciseId: "ex_side_raise", targetSets: 3 }
+        ]});
+        DB.programs.push({ id: "prog_d", label: "休日B・下半身＋上半身（90分）", archived: false, days: "weekend", items: [
+          { exerciseId: "ex_squat", targetSets: 4 },
+          { exerciseId: "ex_rdl", targetSets: 3 },
+          { exerciseId: "ex_leg_press", targetSets: 3 },
+          { exerciseId: "ex_leg_curl", targetSets: 3 },
+          { exerciseId: "ex_calf_raise", targetSets: 3 },
+          { exerciseId: "ex_shoulder_press", targetSets: 3 },
+          { exerciseId: "ex_lat_pulldown", targetSets: 3 },
+          { exerciseId: "ex_incline_db_curl", targetSets: 3 },
+          { exerciseId: "ex_pushdown", targetSets: 3 },
+          { exerciseId: "ex_ab_roller", targetSets: 3 }
+        ]});
+        ["prog_a", "prog_b"].forEach(function (id) { var p0 = progById(id); if (p0) p0.archived = true; });
+        /* 誤っていた初期値だけ直す。自分で変えた値は触らない */
+        if (DB.settings.startWeight === 59) DB.settings.startWeight = 62;
+      }
+    },
+    {
+      /* 手で取り込み済みの端末では、使う日だけが未設定になっている */
+      id: "2026-09-16-days",
+      note: null,
+      needed: function () {
+        var c = progById("prog_c"), d = progById("prog_d");
+        return (c && c.days === undefined) || (d && d.days === undefined);
+      },
+      apply: function () {
+        var c = progById("prog_c"), d = progById("prog_d");
+        if (c && c.days === undefined) c.days = "weekday";
+        if (d && d.days === undefined) d.days = "weekend";
+      }
+    }
+  ];
+
+  function applyDataPatches() {
+    if (readOnly || !storageOK) return;
+    var notes = [], changed = false;
+    DATA_PATCHES.forEach(function (pt) {
+      try {
+        if (!pt.needed()) return;
+        pt.apply();
+        changed = true;
+        if (pt.note) notes.push(pt.note);
+        DevLog.info("patch", "データを移行した: " + pt.id);
+      } catch (e) {
+        DevLog.error("patch", "データの移行に失敗: " + pt.id + " " + e.message);
+      }
+    });
+    /* 何も変えていない起動では書き込まない（毎回の更新時刻の書き換えを避ける） */
+    if (changed) { save("programs"); save("settings"); }
+    if (notes.length) S.patchNotes = notes;
+  }
+
   load();
+  applyDataPatches();
   applyTheme();
   render();
   DevLog.info("boot", "起動", {
