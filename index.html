@@ -534,7 +534,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-09-16 #9";
+  var APP_VERSION = "2026-09-19 #10";
 
   /* --- 開発用ログ ---
      開発期間だけ、端末の中に操作と異常の履歴を残す。
@@ -1804,6 +1804,32 @@
     }
 
     /* 操作 */
+    /* 代わりの種目を足したとき、本来やる順番に動かせるようにする。
+       「後回し」は末尾送りなので、1つずつ動かす手段が別に要る */
+    var ordRow = el("div", "rowbtns");
+    ordRow.style.alignItems = "center";
+    var ordLabel = el("span", null, "順番を変える");
+    ordLabel.style.cssText = "flex:1;font-size:12px;color:var(--ink-3)";
+    var ordBox = el("span", "ord");
+    var upBtn = el("button", null, "↑"); upBtn.setAttribute("aria-label", "1つ上へ");
+    var dnBtn = el("button", null, "↓"); dnBtn.setAttribute("aria-label", "1つ下へ");
+    if (idx === 0) upBtn.disabled = true;
+    if (idx === s.exercises.length - 1) dnBtn.disabled = true;
+    var moveTo = function (to) {
+      var arr = DB.active.exercises;
+      if (to < 0 || to >= arr.length) return;
+      arr.splice(to, 0, arr.splice(idx, 1)[0]);
+      S.openExIdx = to;
+      save("active");
+      DevLog.info("session", "種目の順番を変えた: " + se.snapshot.name + " → " + (to + 1) + "番目");
+      render();
+    };
+    upBtn.addEventListener("click", function () { moveTo(idx - 1); });
+    dnBtn.addEventListener("click", function () { moveTo(idx + 1); });
+    ordBox.appendChild(upBtn); ordBox.appendChild(dnBtn);
+    ordRow.appendChild(ordLabel); ordRow.appendChild(ordBox);
+    body.appendChild(ordRow);
+
     var acts = el("div", "rowbtns");
     var addSet = el("button", "ghost", "セットを追加");
     addSet.addEventListener("click", function () {
@@ -1883,6 +1909,18 @@
 
   var Sound = (function () {
     var alarmUrl = null, alarm = null, ready = false;
+    /* 直前に読み上げを頼んだ時刻。
+       裏に回っている間に頼んだぶんは、前面に戻ってから少し遅れて再生されることがある。
+       それを「詰まっている」と誤判定して取り消すと、案内がまるごと消える */
+    var queuedAt = 0;
+    var STUCK_MS = 6000;
+    var pendingWhileHidden = null;   /* 裏で頼んだ案内 */
+    var spokenTexts = [];            /* 実際に声が出たもの */
+    function stuck() {
+      if (!window.speechSynthesis) return false;
+      if (!speechSynthesis.speaking && !speechSynthesis.pending) return false;
+      return Date.now() - queuedAt > STUCK_MS;
+    }
 
     function wav(samples, rate) {
       var n = samples.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
@@ -1945,26 +1983,57 @@
         try { alarm.currentTime = 0; } catch (e) {}
         alarm.play().catch(function () {});
       },
+      /* 前面に戻ったときの手当て。取り消しはせず、止まっていれば再開させるだけ */
+      unstick: function () {
+        if (!window.speechSynthesis) return;
+        try {
+          if (speechSynthesis.paused) {
+            speechSynthesis.resume();
+            DevLog.info("speech", "止まっていた読み上げを再開した");
+          }
+        } catch (e) {}
+      },
+      /* 裏で頼んだ案内が再生されないまま消えた場合に、前面で言い直す */
+      retryIfLost: function () {
+        var p0 = pendingWhileHidden;
+        pendingWhileHidden = null;
+        if (!p0) return;
+        /* 時間が経ちすぎた案内は、言い直すとかえって誤解を招く */
+        if (Date.now() - p0.at > 8000) return;
+        if (spokenTexts.indexOf(p0.text) >= 0) return;
+        DevLog.info("speech", "裏で流れなかったので言い直す: " + p0.text);
+        this.say(p0.text);
+      },
       say: function (text) {
         if (!DB.settings.restVoice) return;
         if (!window.speechSynthesis) { DevLog.warn("speech", "この端末は読み上げに非対応"); return; }
         duck();
         try {
           /* iOSは一度裏に回ると、読み上げが詰まったまま止まることがある。
-             詰まっていたら取り消してから話させる */
+             ただし、さっき頼んだばかりのものは再生待ちなので取り消さない */
           if (speechSynthesis.paused) speechSynthesis.resume();
-          if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+          if (stuck()) {
+            speechSynthesis.cancel();
+            DevLog.info("speech", "詰まっていた読み上げを取り消した");
+          }
+          queuedAt = Date.now();
           var u = new SpeechSynthesisUtterance(text);
           u.lang = "ja-JP";
           u.rate = DB.settings.restVoiceRate || 0.85;
           u.volume = 1;
           var started = false;
-          u.onstart = function () { started = true; };
+          u.onstart = function () {
+            started = true;
+            spokenTexts.push(text);
+            if (spokenTexts.length > 5) spokenTexts.shift();
+            if (pendingWhileHidden && pendingWhileHidden.text === text) pendingWhileHidden = null;
+          };
           u.onerror = function (ev) {
             DevLog.error("speech", "読み上げ失敗: " + text, { error: ev && ev.error });
           };
           speechSynthesis.speak(u);
           DevLog.info("speech", "読み上げ: " + text);
+          if (document.hidden) pendingWhileHidden = { text: text, at: Date.now() };
           setTimeout(function () {
             if (!started) DevLog.warn("speech", "読み上げが始まらなかった: " + text,
               { speaking: speechSynthesis.speaking, pending: speechSynthesis.pending,
@@ -2267,13 +2336,11 @@
       return;
     }
     DevLog.info("visibility", "前面に戻った", info);
-    /* 裏に回った後は読み上げが詰まっていることがあるので、ここでほどく */
-    try {
-      if (window.speechSynthesis && (speechSynthesis.speaking || speechSynthesis.pending || speechSynthesis.paused)) {
-        speechSynthesis.cancel();
-        DevLog.info("speech", "詰まっていた読み上げを解除した");
-      }
-    } catch (e) {}
+    /* 以前はここで読み上げを取り消していたが、それが原因で
+       「裏で予約 → 戻った瞬間に取り消し」となり、案内が毎回消えていた。
+       取り消さず、止まっていれば再開させ、流れなかったぶんだけ言い直す */
+    Sound.unstick();
+    setTimeout(function () { if (!document.hidden) Sound.retryIfLost(); }, 1200);
     WakeLock.reset();
     WakeLock.sync();
     if (restActive()) tickRest();
@@ -4046,6 +4113,13 @@
     /* 何も変えていない起動では書き込まない（毎回の更新時刻の書き換えを避ける） */
     if (changed) { save("programs"); save("settings"); }
     if (notes.length) S.patchNotes = notes;
+  }
+
+  /* iPhoneでは canvas の映像を別画面に出せない（映像が読み込まれないまま拒否される）。
+     押しても必ず失敗するボタンは出さない */
+  if (!PiP.supported()) {
+    var pipBtn = document.getElementById("restPip");
+    if (pipBtn) pipBtn.style.display = "none";
   }
 
   load();
