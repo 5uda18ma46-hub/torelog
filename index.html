@@ -323,6 +323,8 @@
 
   /* ---------- session ---------- */
   .meters { display: flex; gap: 10px; }
+  .eta { margin-top: 8px; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .eta b { color: var(--ink); font-weight: 650; font-size: 15px; }
   .meter { flex: 1; background: var(--surface-2); border-radius: 10px; padding: 8px 10px;
     display: flex; flex-direction: column; gap: 1px; }
   .meter .k { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
@@ -382,13 +384,13 @@
   .stepper { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
   .stepper .k { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
     color: var(--ink-3); font-weight: 600; }
-  .ctrl { display: flex; align-items: stretch; gap: 5px; min-width: 0; }
-  .ctrl button { flex: 0 0 36px; width: 36px; padding: 0; border: 1px solid var(--line);
+  .ctrl { display: flex; align-items: stretch; gap: 4px; min-width: 0; }
+  .ctrl button { flex: 0 0 40px; width: 40px; padding: 0; border: 1px solid var(--line);
     background: var(--surface-2); color: var(--ink); border-radius: 9px;
     font-size: 18px; font-weight: 500; line-height: 1; cursor: pointer; font-family: var(--font-ui); }
   .ctrl button:hover { border-color: var(--line-strong); }
   .ctrl input { flex: 1 1 0; min-width: 0; width: 100%; border: 1px solid transparent;
-    background: none; color: var(--ink); font-family: var(--font-ui); font-size: 22px;
+    background: none; color: var(--ink); font-family: var(--font-ui); font-size: 20px;
     font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums;
     text-align: center; border-radius: 9px; padding: 4px 0; -moz-appearance: textfield; }
   .ctrl input::-webkit-outer-spin-button, .ctrl input::-webkit-inner-spin-button {
@@ -534,7 +536,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-09-19 #10";
+  var APP_VERSION = "2026-10-11 #11";
 
   /* --- 開発用ログ ---
      開発期間だけ、端末の中に操作と異常の履歴を残す。
@@ -900,9 +902,28 @@
     var last = recs[0];
     var w = last.se.sets[last.se.sets.length - 1].weight;
     if (!e || !e.autoProgress || e.metric === "time" || e.metric === "bodyweight_reps") return w;
+    /* だんだん重くする種目は、軽いセットで上限に届くのは当たり前なので、
+       最終の重さで挙げたセットだけで判定する */
+    var judged = isRamp(e)
+      ? last.se.sets.filter(function (st) { return st.weight >= w; })
+      : last.se.sets;
     var allHit = last.se.sets.length >= last.se.plannedSets &&
-      last.se.sets.every(function (st) { return st.reps >= last.se.snapshot.repHi; });
+      judged.every(function (st) { return st.reps >= last.se.snapshot.repHi; });
     return allHit ? Math.round((w + e.step) * 10) / 10 : w;
+  }
+  /* 1セットごとに刻みぶん重くし、最終セットを目標重量にする組み方。
+     いきなり目標重量に入らないため（2026-10 本人の希望）。
+     明示的に決めていない種目は、バーベル種目だけオン */
+  function isRamp(e) {
+    if (!e || e.metric === "time" || e.metric === "bodyweight_reps") return false;
+    return e.ramp === undefined ? e.gear === "barbell" : !!e.ramp;
+  }
+  function minWeight(e) { return e && e.gear === "barbell" ? 20 : 0; }
+  /* planned セット中 i 番目（0始まり）の予定重量。最終セットが top */
+  function rampWeight(e, top, planned, i) {
+    var k = Math.max(0, planned - 1 - i);
+    var w = Math.round((top - k * e.step) * 10) / 10;
+    return Math.max(Math.min(top, minWeight(e)), w);
   }
   function currentBodyWeight() {
     if (DB.bodyLogs.length) return DB.bodyLogs[DB.bodyLogs.length - 1].weight;
@@ -998,18 +1019,40 @@
 
   /* ±ボタンの長押しで連続増減。何度もタップさせないため。
      最初の1回はclickが担当し、こちらは400ms押し続けたあとの繰り返しだけを受け持つ */
+  /* ±ボタンの1回押しと長押しを、この関数だけで扱う。
+     以前は1回押しを click で拾っていたが、iPhoneでは
+     「スクロールが止まりきる前の一押し」「キーボードを閉じる一押し」で
+     click が発火しないことがあり、1回押しだけ効かない不具合になった（2026-10 ベンチで発生）。
+     指を離した瞬間（pointerup）に1回ぶん進めるので、click の有無に左右されない */
   function holdRepeat(btn, step) {
-    var delay = null, timer = null;
+    var delay = null, timer = null, down = false, repeated = false, downAt = 0;
     function stop() { clearTimeout(delay); clearInterval(timer); delay = timer = null; }
     btn.addEventListener("pointerdown", function () {
       stop();
+      down = true; repeated = false; downAt = Date.now();
       delay = setTimeout(function () {
+        repeated = true;
+        step();
         timer = setInterval(step, 120);
       }, 450);
     });
-    ["pointerup", "pointerleave", "pointercancel"].forEach(function (ev) {
-      btn.addEventListener(ev, stop);
+    btn.addEventListener("pointerup", function () {
+      if (down && !repeated) step();
+      down = false;
+      stop();
     });
+    btn.addEventListener("pointercancel", function () {
+      /* 指が少し動いてスクロール扱いになった。押したのに効かなかった、の手がかりとして残す */
+      if (down && !repeated && Date.now() - downAt < 1000) {
+        DevLog.info("tap", "ボタンの押下がスクロール扱いで取り消された: " +
+          (btn.getAttribute("aria-label") || btn.textContent));
+      }
+      down = false;
+      stop();
+    });
+    btn.addEventListener("pointerleave", function () { down = false; stop(); });
+    /* キーボード操作（detail=0）だけは click で受ける。指やマウスは上で処理済み */
+    btn.addEventListener("click", function (evt) { if (evt.detail === 0) step(); });
   }
 
   var toastTimer = null;
@@ -1351,8 +1394,6 @@
       if (S.weightDraft < 0) S.weightDraft = 0;
       valEl.innerHTML = fmtW(S.weightDraft) + "<small>kg</small>";
     }
-    minus.addEventListener("click", function () { bumpW(-0.1); });
-    plus.addEventListener("click", function () { bumpW(0.1); });
     holdRepeat(minus, function () { bumpW(-0.1); });
     holdRepeat(plus, function () { bumpW(0.1); });
     btns.appendChild(minus); btns.appendChild(plus);
@@ -1592,6 +1633,55 @@
   }
   function seDone(se) { return se.skipped || se.sets.length >= se.plannedSets; }
 
+  /* 残り時間の見込み。1セット = 動作 + その種目のレスト、種目の切り替えに準備時間。
+     この単純な見積もりを、本人の実際のペース（記録した時刻の間隔）で補正する */
+  var ETA_WORK = 40, ETA_SWITCH = 90;
+  function etaModel(list) {
+    /* list: [{sets: 残りセット数, rest: 秒, fresh: まだ1セットもしていないか}] */
+    var sec = 0, lastRest = 0;
+    list.forEach(function (x) {
+      if (!x.sets) return;
+      sec += x.sets * (ETA_WORK + x.rest) + (x.fresh ? ETA_SWITCH : 0);
+      lastRest = x.rest;
+    });
+    return sec ? sec - lastRest : 0; /* 最後のセットのあとは休まない */
+  }
+  /* 1セッションの「実際にかかった時間 ÷ 見積もり」。最初の記録から最後の記録までで測る
+     （終了ボタンを押し忘れても狂わないように） */
+  function paceOf(s) {
+    var times = [], list = [];
+    s.exercises.forEach(function (se) {
+      if (!se.sets.length) return;
+      list.push({ sets: se.sets.length, rest: se.snapshot.restSec, fresh: true });
+      se.sets.forEach(function (st) { if (st.loggedAt) times.push(Date.parse(st.loggedAt)); });
+    });
+    if (times.length < 4) return 0;
+    times.sort(function (a, b) { return a - b; });
+    var actual = (times[times.length - 1] - times[0]) / 1000;
+    /* 最初の記録より前の「動作1回と最初の準備」は実測に入らないので引く */
+    var model = etaModel(list) - ETA_WORK - ETA_SWITCH;
+    if (model <= 0 || actual <= 0) return 0;
+    return actual / model;
+  }
+  function paceFactor(active) {
+    var r = DB.sessions.filter(function (s) { return !s.backfilled; })
+      .slice().sort(function (a, b) { return a.startedAt < b.startedAt ? 1 : -1; })
+      .slice(0, 6).map(paceOf).filter(function (x) { return x > 0.5 && x < 3; })
+      .sort(function (a, b) { return a - b; });
+    var hist = r.length ? r[Math.floor(r.length / 2)] : 1.15;
+    var live = sessionSetCount(active) >= 4 ? paceOf(active) : 0;
+    var f = live > 0.5 && live < 3 ? (hist + live) / 2 : hist;
+    return Math.min(1.6, Math.max(0.8, f));
+  }
+  function remainSec(s) {
+    var list = s.exercises.filter(function (se) { return !se.skipped; }).map(function (se) {
+      return { sets: Math.max(0, se.plannedSets - se.sets.length), rest: se.snapshot.restSec, fresh: !se.sets.length };
+    });
+    var model = etaModel(list);
+    if (!model) return 0;
+    return (restActive() ? restLeftSec() : 0) + model * paceFactor(s);
+  }
+
   function viewSession() {
     if (DB.active && DB.settings.restPip && PiP.supported()) PiP.prepare();
     var s = DB.active;
@@ -1617,6 +1707,15 @@
       "<small>/ " + planned + "</small></div></div>" +
       '<div class="meter"><div class="k">総挙上量</div><div class="v">' + fmtInt(sessionVolume(s)) +
       "<small>kg</small></div></div></div>";
+    /* 終わりの時刻を人に伝えやすいよう、時刻を主にして5分単位で丸める */
+    var rs = remainSec(s);
+    if (rs > 0 && !s.backfilled) {
+      var mins = Math.max(5, Math.round(rs / 300) * 5);
+      var endAt = new Date(Math.round((Date.now() + rs * 1000) / 300000) * 300000);
+      head.appendChild(el("div", "eta",
+        "終了見込み <b>" + endAt.getHours() + ":" + ("0" + endAt.getMinutes()).slice(-2) +
+        "</b> ごろ ・ あと約" + mins + "分"));
+    }
     appEl.appendChild(head);
 
     s.exercises.forEach(function (se, idx) {
@@ -1632,6 +1731,23 @@
     appEl.appendChild(fin);
   }
 
+  /* ウォームアップの中身。base は1セット目に挙げる重さ */
+  function warmupRows(e, m, se, base, heavy) {
+    if (m === "weighted_bw") return [["自重", "5回"]];
+    if (m === "bodyweight_reps") return [["軽めに", Math.max(3, Math.ceil(se.snapshot.repLo / 2)) + "回"]];
+    if (m === "time") return [["軽めに", Math.max(10, Math.round(se.snapshot.repLo / 2)) + "秒"]];
+    var step = e && e.step ? e.step : 2.5;
+    var plan = heavy ? [[0.5, "5回"], [0.75, "3回"]] : [[0.5, "10回"]];
+    var out = [];
+    plan.forEach(function (x) {
+      var w = Math.max(minWeight(e), Math.round(base * x[0] / step) * step);
+      if (w <= 0 || w >= base) return;
+      out.push([weightLabel(m, Math.round(w * 10) / 10) + "（" + Math.round(x[0] * 100) + "%）", x[1]]);
+    });
+    if (!out.length) out.push(["軽めに", "10回"]);
+    return out;
+  }
+
   function exerciseCard(s, se, idx) {
     var open = S.openExIdx === idx;
     var done = seDone(se);
@@ -1641,9 +1757,13 @@
     for (var i = 0; i < total; i++) dots += '<span class="dot' + (i < se.sets.length ? " filled" : "") + '"></span>';
 
     var m = se.snapshot.metric;
+    var exDef = exById(se.exerciseId);
+    var top = suggestWeight(se.exerciseId);
+    var ramp = isRamp(exDef);
+    var firstW = ramp ? rampWeight(exDef, top, se.plannedSets, 0) : top;
     var sub = se.sets.length
       ? se.sets.map(function (x) { return x.reps; }).join(", ") + (m === "time" ? "秒" : "回")
-      : weightLabel(m, suggestWeight(se.exerciseId)) + " ・ " +
+      : (ramp && firstW < top ? fmtW(firstW) + "→" : "") + weightLabel(m, top) + " ・ " +
         repLabel(se.snapshot.repLo, se.snapshot.repHi, m) + " × " + se.plannedSets;
 
     var head = el("button", "head");
@@ -1669,7 +1789,6 @@
 
     /* やり方の動画。設定されている種目だけボタンを出す。
        押されたときに初めて iframe を作るので、普段は通信しない */
-    var exDef = exById(se.exerciseId);
     if (exDef && parseYouTube(exDef.videoUrl)) {
       var vOpen = S.openVideo === se.exerciseId;
       var vBtn = el("button", "videobtn" + (vOpen ? " on" : ""),
@@ -1685,17 +1804,17 @@
       }
     }
 
-    /* ウォームアップ（表示のみ・記録しない） */
-    var wNow = se.sets.length ? se.sets[se.sets.length - 1].weight : suggestWeight(se.exerciseId);
-    if (se.snapshot.restSec >= 150 && (m === "weight_reps" || m === "weighted_bw")) {
-      var rows;
-      if (m === "weighted_bw") rows = [["自重", "5回"]];
-      else rows = [
-        [fmtW(Math.round(wNow * 0.5 / 2.5) * 2.5) + "kg（50%）", "5回"],
-        [fmtW(Math.round(wNow * 0.75 / 2.5) * 2.5) + "kg（75%）", "3回"]
-      ];
+    /* ウォームアップ（表示のみ・記録しない）。
+       重い種目に加えて、その部位を今日はじめて動かす種目にも出す（怪我の予防）。
+       順番は入れ替わるので「並びの先頭」ではなく「同じ部位にまだ記録がないか」で決める */
+    var firstOfPart = !s.exercises.some(function (o, j) {
+      return j !== idx && o.snapshot.part === se.snapshot.part && o.sets.length > 0;
+    });
+    var heavy = se.snapshot.restSec >= 150 && (m === "weight_reps" || m === "weighted_bw");
+    var rows = firstOfPart || heavy ? warmupRows(exDef, m, se, se.sets.length ? se.sets[0].weight : firstW, heavy) : [];
+    if (rows.length) {
       body.appendChild(el("div", "warmup",
-        '<div class="k">ウォームアップ（記録しない）</div>' +
+        '<div class="k">ウォームアップ（' + (firstOfPart ? esc(PART_LABEL[se.snapshot.part] || "") + "の1種目め・" : "") + "記録しない）</div>" +
         rows.map(function (r) { return '<div class="rr"><span>' + r[0] + "</span><span>" + r[1] + "</span></div>"; }).join("")));
     }
 
@@ -1721,10 +1840,16 @@
 
     /* 入力 */
     if (!done) {
-      var curW = se.sets.length ? se.sets[se.sets.length - 1].weight : suggestWeight(se.exerciseId);
-      var curR = se.sets.length ? Math.min(se.sets[se.sets.length - 1].reps, se.snapshot.repHi) : se.snapshot.repHi;
-      var e = exById(se.exerciseId);
+      var e = exDef;
       var step = e ? e.step : 2.5;
+      var lastW = se.sets.length ? se.sets[se.sets.length - 1].weight : null;
+      var curW;
+      if (lastW === null) curW = firstW;
+      /* だんだん重く: 前のセットから刻み1つ上げる。実際の重さから数えるので、
+         途中で下げても上げても、そこから目標重量まで登り直す */
+      else if (ramp && lastW < top) curW = Math.min(top, Math.round((lastW + step) * 10) / 10);
+      else curW = lastW;
+      var curR = se.sets.length ? Math.min(se.sets[se.sets.length - 1].reps, se.snapshot.repHi) : se.snapshot.repHi;
       var isTime = m === "time";
       var noWeight = m === "time" || m === "bodyweight_reps";
 
@@ -1732,7 +1857,8 @@
       inp.innerHTML =
         '<div class="input-head"><span class="k">Set ' + (se.sets.length + 1) + "</span>" +
         '<span class="target">目標 ' + repLabel(se.snapshot.repLo, se.snapshot.repHi, m) +
-        (noWeight ? "" : " ・ 刻み " + fmtW(step) + "kg") + "</span></div>" +
+        (noWeight ? "" : " ・ 刻み " + fmtW(step) + "kg") +
+        (ramp && curW < top ? " ・ 最終 " + fmtW(top) + "kg" : "") + "</span></div>" +
         '<div class="steppers">' +
         (noWeight ? "" :
           '<div class="stepper"><span class="k">' + (m === "weighted_bw" ? "加重" : "重量") + "</span>" +
@@ -1786,6 +1912,7 @@
         if (!b) return;
         var a = b.getAttribute("data-a");
         var v = read();
+        /* ±は holdRepeat が受け持つ。ここで拾うと1回押しで2つ進む */
         if (a === "log") {
           se.sets.push({ weight: v.w, reps: v.r, loggedAt: new Date().toISOString() });
           save("active");
@@ -1795,9 +1922,7 @@
             S.openExIdx = nxt;
           }
           render();
-          return;
         }
-        bump(a);
       });
       body.appendChild(inp);
       setTimeout(guard, 0);
@@ -3235,8 +3360,11 @@
       function () { e.repHi = Math.max(e.repLo, e.repHi - 1); render(); },
       function () { e.repHi = e.repHi + 1; render(); });
     if (!noW) {
-      switchRow(p, "重量アップを提案する", "全セットが上限に届いたら次回 +" + fmtW(e.step) + "kg",
+      switchRow(p, "重量アップを提案する",
+        (isRamp(e) ? "最終の重さのセットが" : "全セットが") + "上限に届いたら次回 +" + fmtW(e.step) + "kg",
         e.autoProgress, function () { e.autoProgress = !e.autoProgress; render(); });
+      switchRow(p, "だんだん重くする", "1セットごとに +" + fmtW(e.step) + "kg し、最終セットを目標の重さにする",
+        isRamp(e), function () { e.ramp = !isRamp(e); render(); });
       stepRow(p, "目標の推定1RM", "グラフに破線で引く", e.goal1RM ? fmtW(e.goal1RM) + "kg" : "なし",
         function () { e.goal1RM = Math.max(0, Math.round((e.goal1RM - 2.5) * 10) / 10); render(); },
         function () { e.goal1RM = Math.round((e.goal1RM + 2.5) * 10) / 10; render(); });
