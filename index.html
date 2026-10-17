@@ -536,7 +536,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-10-11 #11";
+  var APP_VERSION = "2026-10-17 #12";
 
   /* --- 開発用ログ ---
      開発期間だけ、端末の中に操作と異常の履歴を残す。
@@ -898,12 +898,17 @@
   function suggestWeight(exerciseId) {
     var e = exById(exerciseId);
     var recs = recordsOf(exerciseId);
+    /* トレーニング側（PT）が決めた次回の重量。決めた後に1回でも記録したら、以降は記録から出す */
+    if (e && e.targetWeight != null && e.targetSetAt &&
+        !recs.some(function (r) { return (r.s.endedAt || r.s.startedAt || "") > e.targetSetAt; })) {
+      return e.targetWeight;
+    }
     if (!recs.length) return e ? e.defaultWeight : 0;
     var last = recs[0];
     var w = last.se.sets[last.se.sets.length - 1].weight;
     if (!e || !e.autoProgress || e.metric === "time" || e.metric === "bodyweight_reps") return w;
-    /* だんだん重くする種目は、軽いセットで上限に届くのは当たり前なので、
-       最終の重さで挙げたセットだけで判定する */
+    /* だんだん重くする種目は、1セット目が軽いので上限に届くのは当然。
+       目標の重さで挙げたセットだけで判定する */
     var judged = isRamp(e)
       ? last.se.sets.filter(function (st) { return st.weight >= w; })
       : last.se.sets;
@@ -911,18 +916,20 @@
       judged.every(function (st) { return st.reps >= last.se.snapshot.repHi; });
     return allHit ? Math.round((w + e.step) * 10) / 10 : w;
   }
-  /* 1セットごとに刻みぶん重くし、最終セットを目標重量にする組み方。
-     いきなり目標重量に入らないため（2026-10 本人の希望）。
+  /* 1セット目だけ目標より1刻み軽くし、2セット目から目標重量で揃える組み方。
+     いきなり目標重量に入らないため（2026-10-11 本人の希望）。
+     当初は1セットごとに1刻みずつ上げていたが、前半が軽すぎて効くセットが減るため
+     2026-10-17 にトレーニング側の判断でこの形に変えた。
      明示的に決めていない種目は、バーベル種目だけオン */
   function isRamp(e) {
     if (!e || e.metric === "time" || e.metric === "bodyweight_reps") return false;
     return e.ramp === undefined ? e.gear === "barbell" : !!e.ramp;
   }
   function minWeight(e) { return e && e.gear === "barbell" ? 20 : 0; }
-  /* planned セット中 i 番目（0始まり）の予定重量。最終セットが top */
+  /* planned セット中 i 番目（0始まり）の予定重量。1セット目だけ1刻み軽い */
   function rampWeight(e, top, planned, i) {
-    var k = Math.max(0, planned - 1 - i);
-    var w = Math.round((top - k * e.step) * 10) / 10;
+    if (i > 0 || planned < 2) return top;
+    var w = Math.round((top - e.step) * 10) / 10;
     return Math.max(Math.min(top, minWeight(e)), w);
   }
   function currentBodyWeight() {
@@ -1236,13 +1243,32 @@
 
   /* 今日の曜日に合うメニューを優先する。
      合うメニューが複数あればその中で順番に回し、1つもなければ全メニューを順番に回す */
+  /* 脚の種目が半分以上なら「下半身の日」とみなす */
+  function isLowerParts(parts) {
+    if (!parts.length) return false;
+    return parts.filter(function (x) { return x === "legs"; }).length * 2 >= parts.length;
+  }
+  function isLowerProgram(p) {
+    return isLowerParts(p.items.map(function (it) { var e = exById(it.exerciseId); return e ? e.part : ""; }));
+  }
   function nextProgram() {
     var all = activePrograms();
     if (!all.length) return null;
+    var done = doneSessions();
+    /* 前回が上半身なら下半身、の交互で回す（2026-10-17 トレーニング側の方針）。
+       前回のメニューが外したものでも、中身の部位で判定できる */
+    var lastS = done.filter(function (x) { return x.exercises.length; })[0];
+    if (lastS) {
+      var lastLower = isLowerParts(lastS.exercises.map(function (se) { return se.snapshot.part; }));
+      var other = all.filter(function (p) { return isLowerProgram(p) !== lastLower; });
+      if (other.length) {
+        var od = other.filter(function (p) { return p.days === dayType(); });
+        return (od.length ? od : other)[0];
+      }
+    }
     var today = dayType();
     var typed = all.filter(function (p) { return p.days === today; });
     var list = typed.length ? typed : all;
-    var done = doneSessions();
     for (var i = 0; i < done.length; i++) {
       if (!done[i].programId) continue;
       for (var j = 0; j < list.length; j++) {
@@ -1268,7 +1294,7 @@
       pn.style.borderColor = "transparent";
       pn.innerHTML = '<div style="font-size:13.5px;line-height:1.6">' +
         S.patchNotes.map(esc).join("<br>") +
-        '<br><span style="color:var(--ink-2);font-size:12px">旧Day A / Day B は設定の「使わなくなったメニュー」から戻せます</span></div>';
+        '<br><span style="color:var(--ink-2);font-size:12px">前のメニューは設定の「使わなくなったメニュー」から戻せます</span></div>';
       var ok = el("button", "ghost", "OK");
       ok.style.flex = "none";
       ok.addEventListener("click", function () { S.patchNotes = null; render(); });
@@ -1845,9 +1871,9 @@
       var lastW = se.sets.length ? se.sets[se.sets.length - 1].weight : null;
       var curW;
       if (lastW === null) curW = firstW;
-      /* だんだん重く: 前のセットから刻み1つ上げる。実際の重さから数えるので、
-         途中で下げても上げても、そこから目標重量まで登り直す */
-      else if (ramp && lastW < top) curW = Math.min(top, Math.round((lastW + step) * 10) / 10);
+      /* だんだん重く: 軽い1セット目のあとは目標重量へ。
+         2セット目以降に自分で下げたときは、その判断を尊重して下げた重さのまま */
+      else if (ramp && se.sets.length === 1 && lastW < top) curW = top;
       else curW = lastW;
       var curR = se.sets.length ? Math.min(se.sets[se.sets.length - 1].reps, se.snapshot.repHi) : se.snapshot.repHi;
       var isTime = m === "time";
@@ -1858,7 +1884,7 @@
         '<div class="input-head"><span class="k">Set ' + (se.sets.length + 1) + "</span>" +
         '<span class="target">目標 ' + repLabel(se.snapshot.repLo, se.snapshot.repHi, m) +
         (noWeight ? "" : " ・ 刻み " + fmtW(step) + "kg") +
-        (ramp && curW < top ? " ・ 最終 " + fmtW(top) + "kg" : "") + "</span></div>" +
+        (ramp && curW < top ? " ・ 2セット目から " + fmtW(top) + "kg" : "") + "</span></div>" +
         '<div class="steppers">' +
         (noWeight ? "" :
           '<div class="stepper"><span class="k">' + (m === "weighted_bw" ? "加重" : "重量") + "</span>" +
@@ -3361,9 +3387,9 @@
       function () { e.repHi = e.repHi + 1; render(); });
     if (!noW) {
       switchRow(p, "重量アップを提案する",
-        (isRamp(e) ? "最終の重さのセットが" : "全セットが") + "上限に届いたら次回 +" + fmtW(e.step) + "kg",
+        (isRamp(e) ? "目標の重さのセットが全部" : "全セットが") + "上限に届いたら次回 +" + fmtW(e.step) + "kg",
         e.autoProgress, function () { e.autoProgress = !e.autoProgress; render(); });
-      switchRow(p, "だんだん重くする", "1セットごとに +" + fmtW(e.step) + "kg し、最終セットを目標の重さにする",
+      switchRow(p, "だんだん重くする", "1セット目だけ −" + fmtW(e.step) + "kg、2セット目から目標の重さ",
         isRamp(e), function () { e.ramp = !isRamp(e); render(); });
       stepRow(p, "目標の推定1RM", "グラフに破線で引く", e.goal1RM ? fmtW(e.goal1RM) + "kg" : "なし",
         function () { e.goal1RM = Math.max(0, Math.round((e.goal1RM - 2.5) * 10) / 10); render(); },
@@ -4220,6 +4246,61 @@
         var c = progById("prog_c"), d = progById("prog_d");
         if (c && c.days === undefined) c.days = "weekday";
         if (d && d.days === undefined) d.days = "weekend";
+      }
+    },
+    {
+      /* トレーニング側の改定（パーソナルトレーニングスペシャリスト/現行プログラム.md が正）。
+         上半身の日と下半身の日を交互に回す。旧メニューは記録のために残してローテーションから外す */
+      id: "2026-10-17-menu",
+      note: "メニューを「上半身の日」「下半身の日」の交互に切り替え、次回の重量をトレーニング側の指定に合わせました",
+      needed: function () { return !progById("prog_upper") && !progById("prog_lower"); },
+      apply: function () {
+        var now = new Date().toISOString();
+        DB.programs.push({ id: "prog_upper", label: "上半身の日", archived: false, days: null, items: [
+          { exerciseId: "ex_bench_press", targetSets: 4 },
+          { exerciseId: "ex_weighted_pullup", targetSets: 4 },
+          { exerciseId: "ex_incline_db_press", targetSets: 3 },
+          { exerciseId: "ex_shoulder_press", targetSets: 3 },
+          { exerciseId: "ex_seated_row", targetSets: 3 },
+          { exerciseId: "ex_side_raise", targetSets: 3 },
+          { exerciseId: "ex_incline_db_curl", targetSets: 3 },
+          { exerciseId: "ex_pushdown", targetSets: 3 }
+        ]});
+        DB.programs.push({ id: "prog_lower", label: "下半身の日", archived: false, days: null, items: [
+          { exerciseId: "ex_squat", targetSets: 4 },
+          { exerciseId: "ex_rdl", targetSets: 3 },
+          { exerciseId: "ex_leg_press", targetSets: 3 },
+          { exerciseId: "ex_leg_curl", targetSets: 3 },
+          { exerciseId: "ex_calf_raise", targetSets: 3 }
+        ]});
+        DB.programs.forEach(function (p0) {
+          if (p0.id !== "prog_upper" && p0.id !== "prog_lower") p0.archived = true;
+        });
+        /* 種目ごとの指定。restSec はプログラム表の休息、targetWeight は次回の重量 */
+        var spec = {
+          ex_bench_press:      { targetWeight: 75 },
+          ex_weighted_pullup:  { repLo: 6, repHi: 8, restSec: 120, targetWeight: 2.5 },
+          ex_incline_db_press: { targetWeight: 22 },
+          ex_shoulder_press:   { restSec: 90, targetWeight: 16 },
+          ex_seated_row:       { restSec: 90, targetWeight: 50 },
+          ex_side_raise:       { restSec: 60 },
+          ex_pushdown:         { targetWeight: 42.5 },
+          /* 下半身のバーベルは1刻み5kg（1セット目 55→60、上げ幅も1回5kgまで） */
+          ex_squat:            { step: 5, targetWeight: 60 },
+          ex_rdl:              { step: 5, targetWeight: 60 },
+          ex_leg_press:        { targetWeight: 80 },
+          ex_leg_curl:         { targetWeight: 40 },
+          ex_calf_raise:       { targetWeight: 40 }
+        };
+        Object.keys(spec).forEach(function (id) {
+          var e = exById(id);
+          if (!e) return;
+          var v = spec[id];
+          Object.keys(v).forEach(function (k) { e[k] = v[k]; });
+          if (v.targetWeight != null) e.targetSetAt = now;
+          if (e.archived) e.archived = false;
+        });
+        save("exercises");
       }
     }
   ];
