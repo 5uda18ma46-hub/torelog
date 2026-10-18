@@ -536,7 +536,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-10-17 #12";
+  var APP_VERSION = "2026-10-18 #13";
 
   /* --- 開発用ログ ---
      開発期間だけ、端末の中に操作と異常の履歴を残す。
@@ -1871,9 +1871,10 @@
       var lastW = se.sets.length ? se.sets[se.sets.length - 1].weight : null;
       var curW;
       if (lastW === null) curW = firstW;
-      /* だんだん重く: 軽い1セット目のあとは目標重量へ。
-         2セット目以降に自分で下げたときは、その判断を尊重して下げた重さのまま */
-      else if (ramp && se.sets.length === 1 && lastW < top) curW = top;
+      /* だんだん重く: 予定どおりの軽い1セット目のあとは目標重量へ。
+         1セット目を予定より軽くした・2セット目以降に下げたときは、その判断を尊重して同じ重さのまま
+         （2026-10-18 ベンチ1セット目を70kgにしたら次が75kgに跳ねた） */
+      else if (ramp && se.sets.length === 1 && lastW >= firstW && lastW < top) curW = top;
       else curW = lastW;
       var curR = se.sets.length ? Math.min(se.sets[se.sets.length - 1].reps, se.snapshot.repHi) : se.snapshot.repHi;
       var isTime = m === "time";
@@ -2376,7 +2377,7 @@
     };
   })();
 
-  var restEndsAt = 0, restTotal = 0, restTimer = null, restDone = false;
+  var restEndsAt = 0, restTotal = 0, restTimer = null, restDone = false, restStopTimer = null;
   var restLabel = "";
   var restCued = {};
 
@@ -2392,6 +2393,8 @@
   }
   function startRest(sec, label) {
     if (!sec) return;
+    /* 前のレストの「終了2.5秒後に消す」が残っていると、新しいレストまで消してしまう */
+    clearTimeout(restStopTimer);
     restEndsAt = Date.now() + sec * 1000;
     restTotal = sec;
     restDone = false;
@@ -2447,7 +2450,8 @@
     }
     DevLog.info("rest", "レスト終了", { late: late });
     notifyRestDone();
-    setTimeout(stopRest, 2500);
+    clearTimeout(restStopTimer);
+    restStopTimer = setTimeout(stopRest, 2500);
   }
   function stopRest() {
     clearInterval(restTimer);
@@ -2477,7 +2481,10 @@
       toast("別画面を開けませんでした。設定 → 開発用ログ に理由が残っています");
     });
   });
-  document.getElementById("restSkip").addEventListener("click", stopRest);
+  document.getElementById("restSkip").addEventListener("click", function () {
+    DevLog.info("rest", "レストをスキップ", { left: restActive() ? restLeftSec() : null });
+    stopRest();
+  });
   document.addEventListener("visibilitychange", function () {
     var info = { rest: restActive() ? restLeftSec() : null, session: !!DB.active };
     if (document.hidden) {
