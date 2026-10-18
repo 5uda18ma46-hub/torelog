@@ -421,6 +421,7 @@
     background: none; color: inherit; border-radius: 8px; padding: 7px 11px;
     font-family: var(--font-ui); font-size: 12.5px; font-weight: 550; cursor: pointer; }
   .rest button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+  .rest button.armed { background: color-mix(in srgb, currentColor 22%, transparent); font-weight: 650; }
   .rest-track { height: 3px; border-radius: 2px; overflow: hidden;
     background: color-mix(in srgb, currentColor 22%, transparent); }
   .rest-fill { height: 100%; width: 100%; background: var(--accent); transition: width .95s linear; }
@@ -536,7 +537,7 @@
   /* 表示用のビルド番号。デプロイのたびに上げる。
      GitHub Pages は10分キャッシュするので、
      「今どのビルドが動いているか」が分からないと切り分けができない */
-  var APP_VERSION = "2026-10-18 #13";
+  var APP_VERSION = "2026-10-18 #14";
 
   /* --- 開発用ログ ---
      開発期間だけ、端末の中に操作と異常の履歴を残す。
@@ -1063,11 +1064,11 @@
   }
 
   var toastTimer = null;
-  function toast(msg) {
+  function toast(msg, ms) {
     var t = document.getElementById("toast");
     t.textContent = msg; t.className = "toast on";
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.className = "toast"; }, 2200);
+    toastTimer = setTimeout(function () { t.className = "toast"; }, ms || 2200);
   }
   function setLabel(metric, w, r) {
     if (metric === "time") return r + "秒";
@@ -2065,6 +2066,7 @@
        裏に回っている間に頼んだぶんは、前面に戻ってから少し遅れて再生されることがある。
        それを「詰まっている」と誤判定して取り消すと、案内がまるごと消える */
     var queuedAt = 0;
+    var selfCancelAt = 0;
     var STUCK_MS = 6000;
     var pendingWhileHidden = null;   /* 裏で頼んだ案内 */
     var spokenTexts = [];            /* 実際に声が出たもの */
@@ -2165,6 +2167,7 @@
              ただし、さっき頼んだばかりのものは再生待ちなので取り消さない */
           if (speechSynthesis.paused) speechSynthesis.resume();
           if (stuck()) {
+            selfCancelAt = Date.now();
             speechSynthesis.cancel();
             DevLog.info("speech", "詰まっていた読み上げを取り消した");
           }
@@ -2181,7 +2184,13 @@
             if (pendingWhileHidden && pendingWhileHidden.text === text) pendingWhileHidden = null;
           };
           u.onerror = function (ev) {
-            DevLog.error("speech", "読み上げ失敗: " + text, { error: ev && ev.error });
+            var err = ev && ev.error;
+            /* 詰まりを解くためにアプリ自身が取り消したものは不具合ではない（件数バッジに数えない） */
+            if ((err === "canceled" || err === "interrupted") && Date.now() - selfCancelAt < 1500) {
+              DevLog.info("speech", "取り消した読み上げ: " + text, { error: err });
+              return;
+            }
+            DevLog.error("speech", "読み上げ失敗: " + text, { error: err });
           };
           speechSynthesis.speak(u);
           DevLog.info("speech", "読み上げ: " + text);
@@ -2441,8 +2450,11 @@
   function finishRest() {
     var late = Math.round((Date.now() - restEndsAt) / 1000);
     if (late > 5) {
-      /* 裏に回っていて気づくのが遅れた。今さら鳴らしても意味がないので黙る */
+      /* 裏に回っていて気づくのが遅れた。今さら鳴らしても意味がないので音は出さないが、
+         黙って消えると「タイマーが消えた」ように見えるので、どれだけ過ぎたかを文字で伝える */
       DevLog.warn("rest-late", "レスト終了に " + late + "秒 遅れて気づいた", { late: late });
+      toast("休憩は " + (late >= 60 ? Math.floor(late / 60) + "分" + (late % 60 ? late % 60 + "秒" : "") : late + "秒") +
+        " 前に終わっています", 5000);
     } else {
       Sound.alarm();
       Sound.say("レスト終了");
@@ -2454,6 +2466,7 @@
     restStopTimer = setTimeout(stopRest, 2500);
   }
   function stopRest() {
+    resetSkip();
     clearInterval(restTimer);
     restEndsAt = 0; restTotal = 0; restDone = false; restCued = {};
     PiP.stop();
@@ -2481,7 +2494,22 @@
       toast("別画面を開けませんでした。設定 → 開発用ログ に理由が残っています");
     });
   });
+  /* スキップは2回押し。1回目は表示が変わるだけで、3秒以内にもう一度押したときだけ止める。
+     次のセットの入力中に指が当たって休憩が消えたため（2026-10-17 懸垂、ログから推定） */
+  var skipArmedTimer = null;
+  function resetSkip() {
+    clearTimeout(skipArmedTimer); skipArmedTimer = null;
+    var b = document.getElementById("restSkip");
+    b.textContent = "スキップ"; b.classList.remove("armed");
+  }
   document.getElementById("restSkip").addEventListener("click", function () {
+    var b = document.getElementById("restSkip");
+    if (!skipArmedTimer) {
+      b.textContent = "もう一度で終了"; b.classList.add("armed");
+      skipArmedTimer = setTimeout(resetSkip, 3000);
+      return;
+    }
+    resetSkip();
     DevLog.info("rest", "レストをスキップ", { left: restActive() ? restLeftSec() : null });
     stopRest();
   });
